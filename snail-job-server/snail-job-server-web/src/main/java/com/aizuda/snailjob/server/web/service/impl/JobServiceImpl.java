@@ -96,8 +96,7 @@ public class JobServiceImpl implements JobService {
                         .eq(Job::getNamespaceId, userSessionVO.getNamespaceId())
                         .in(CollUtil.isNotEmpty(groupNames), Job::getGroupName, groupNames)
                         .likeRight(StrUtil.isNotBlank(queryVO.getJobName()), Job::getJobName, StrUtil.trim(queryVO.getJobName()))
-                        .like(StrUtil.isNotBlank(queryVO.getExecutorInfo()), Job::getExecutorInfo,
-                                StrUtil.trim(queryVO.getExecutorInfo()))
+                        .like(StrUtil.isNotBlank(queryVO.getExecutorInfo()), Job::getExecutorInfo, StrUtil.trim(queryVO.getExecutorInfo()))
                         .eq(Objects.nonNull(queryVO.getJobStatus()), Job::getJobStatus, queryVO.getJobStatus())
                         .eq(Job::getDeleted, StatusEnum.NO.getStatus())
                         .eq(Objects.nonNull(queryVO.getOwnerId()), Job::getOwnerId, queryVO.getOwnerId())
@@ -105,8 +104,9 @@ public class JobServiceImpl implements JobService {
         List<JobResponseVO> jobResponseList = JobResponseVOConverter.INSTANCE.convertList(selectPage.getRecords());
 
         for (JobResponseVO jobResponseVO : jobResponseList) {
-            SystemUser systemUser = systemUserMapper.selectById(jobResponseVO.getOwnerId());
-            if (Objects.nonNull(systemUser)) {
+            // 兼容Oracle OwnerId Null查询异常：java.sql.SQLException: 无效的列类型: 1111
+            if (Objects.nonNull(jobResponseVO.getOwnerId())) {
+                SystemUser systemUser = systemUserMapper.selectById(jobResponseVO.getOwnerId());
                 jobResponseVO.setOwnerName(systemUser.getUsername());
             }
         }
@@ -151,8 +151,6 @@ public class JobServiceImpl implements JobService {
                 % systemProperties.getBucketTotal());
         job.setNextTriggerAt(calculateNextTriggerAt(jobRequestVO, DateUtils.toNowMilli()));
         job.setNamespaceId(UserSessionUtils.currentUserSession().getNamespaceId());
-        job.setNotifyIds(JsonUtil.toJsonString(jobRequestVO.getNotifyIds()));
-        job.setOwnerId(jobRequestVO.getOwnerId());
         job.setId(null);
         return 1 == jobMapper.insert(job);
     }
@@ -166,8 +164,6 @@ public class JobServiceImpl implements JobService {
 
         // 判断常驻任务
         Job updateJob = JobConverter.INSTANCE.convert(jobRequestVO);
-        updateJob.setNotifyIds(JsonUtil.toJsonString(jobRequestVO.getNotifyIds()));
-        updateJob.setOwnerId(jobRequestVO.getOwnerId());
         updateJob.setResident(isResident(jobRequestVO));
         updateJob.setNamespaceId(job.getNamespaceId());
 
@@ -245,7 +241,7 @@ public class JobServiceImpl implements JobService {
         // 设置now表示立即执行
         jobTaskPrepare.setNextTriggerAt(DateUtils.toNowMilli());
         jobTaskPrepare.setTaskExecutorScene(JobTaskExecutorSceneEnum.MANUAL_JOB.getType());
-        if (StrUtil.isNotBlank(jobTrigger.getTmpArgsStr())){
+        if (StrUtil.isNotBlank(jobTrigger.getTmpArgsStr())) {
             jobTaskPrepare.setTmpArgsStr(jobTrigger.getTmpArgsStr());
         }
         // 创建批次

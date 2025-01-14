@@ -37,6 +37,9 @@ public interface WorkflowConverter {
 
     WorkflowConverter INSTANCE = Mappers.getMapper(WorkflowConverter.class);
 
+    @Mappings({
+            @Mapping(target = "notifyIds", expression = "java(WorkflowConverter.toNotifyIdsStr(workflowRequestVO.getNotifyIds()))")
+    })
     Workflow convert(WorkflowRequestVO workflowRequestVO);
 
     WorkflowNode convert(WorkflowRequestVO.NodeInfo nodeInfo);
@@ -117,7 +120,7 @@ public interface WorkflowConverter {
 
     static String toNotifyIdsStr(Set<Long> notifyIds) {
         if (CollUtil.isEmpty(notifyIds)) {
-            return null;
+            return StrUtil.EMPTY;
         }
 
         return JsonUtil.toJsonString(notifyIds);

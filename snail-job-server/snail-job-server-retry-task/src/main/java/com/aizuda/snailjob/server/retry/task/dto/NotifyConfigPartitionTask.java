@@ -14,6 +14,7 @@ import java.util.Set;
  */
 @EqualsAndHashCode(callSuper = true)
 @Data
+@Deprecated
 public class NotifyConfigPartitionTask extends PartitionTask {
 
     private String namespaceId;
