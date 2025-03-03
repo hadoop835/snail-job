@@ -13,10 +13,6 @@
     <name>snail-job-client-starter</name>
     <description>snail-job-client-starter</description>
 
-    <properties>
-        <java.version>17</java.version>
-    </properties>
-
     <dependencies>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -27,6 +23,12 @@
             <groupId>com.aizuda</groupId>
             <artifactId>snail-job-client-retry-core</artifactId>
             <scope>provided</scope>
+            <exclusions>
+                <exclusion>
+                    <artifactId>error_prone_annotations</artifactId>
+                    <groupId>com.google.errorprone</groupId>
+                </exclusion>
+            </exclusions>
             <optional>true</optional>
         </dependency>
         <dependency>

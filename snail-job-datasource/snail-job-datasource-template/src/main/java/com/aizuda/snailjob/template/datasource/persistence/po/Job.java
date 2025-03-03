@@ -5,6 +5,8 @@ import com.aizuda.snailjob.common.core.enums.JobTaskTypeEnum;
 import com.aizuda.snailjob.common.core.enums.StatusEnum;
 import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
+import org.apache.ibatis.type.JdbcType;
 
 /**
  * 任务信息
@@ -12,6 +14,7 @@ import lombok.Data;
  * @author opensnail
  * @since 2023-09-24
  */
+@EqualsAndHashCode(callSuper = true)
 @Data
 @TableName("sj_job")
 public class Job extends CreateUpdateDt {
@@ -148,7 +151,7 @@ public class Job extends CreateUpdateDt {
     /**
      * 负责人id
      */
-    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    @TableField(updateStrategy = FieldStrategy.ALWAYS , jdbcType= JdbcType.BIGINT )
     private Long ownerId;
 
 }

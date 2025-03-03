@@ -1,9 +1,12 @@
 package com.aizuda.snailjob.server.retry.task.support;
 
+import com.aizuda.snailjob.server.common.dto.RetryLogMetaDTO;
+import com.aizuda.snailjob.server.retry.task.dto.RequestCallbackExecutorDTO;
+import com.aizuda.snailjob.server.retry.task.dto.RequestRetryExecutorDTO;
 import com.aizuda.snailjob.server.retry.task.dto.RetryMergePartitionTaskDTO;
-import com.aizuda.snailjob.server.retry.task.support.dispatch.actor.log.RetryTaskLogDTO;
+import com.aizuda.snailjob.server.retry.task.dto.RetryTaskLogDTO;
+import com.aizuda.snailjob.template.datasource.persistence.po.Retry;
 import com.aizuda.snailjob.template.datasource.persistence.po.RetryTask;
-import com.aizuda.snailjob.template.datasource.persistence.po.RetryTaskLog;
 import com.aizuda.snailjob.template.datasource.persistence.po.RetryTaskLogMessage;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
@@ -24,11 +27,17 @@ public interface RetryTaskLogConverter {
     @Mappings({
             @Mapping(target = "id", ignore = true),
     })
-    RetryTaskLog toRetryTask(RetryTask retryTask);
+    RetryTask toRetryTask(Retry retry);
 
-    RetryTaskLogDTO toRetryTaskLogDTO(RetryTask retryTask);
+    RetryTaskLogDTO toRetryTaskLogDTO(Retry retry);
 
-    List<RetryMergePartitionTaskDTO> toRetryMergePartitionTaskDTOs(List<RetryTaskLog> retryTaskLogList);
+    RetryTaskLogDTO toRetryTaskLogDTO(RequestRetryExecutorDTO retry);
+
+    List<RetryMergePartitionTaskDTO> toRetryMergePartitionTaskDTOs(List<RetryTask> retryTaskList);
 
     RetryTaskLogMessage toRetryTaskLogMessage(RetryTaskLogMessage message);
+
+    RetryLogMetaDTO toRetryLogMetaDTO(RequestRetryExecutorDTO executorDTO);
+
+    RetryLogMetaDTO toRetryLogMetaDTO(RequestCallbackExecutorDTO executorDTO);
 }

@@ -32,6 +32,8 @@ public class SceneConfigResponseVO {
 
     private Integer routeKey;
 
+    private Integer blockStrategy;
+
     private Integer executorTimeout;
 
     private LocalDateTime createDt;
@@ -42,4 +44,24 @@ public class SceneConfigResponseVO {
      * 通知告警场景配置id列表
      */
     private Set<Long> notifyIds;
+
+    /**
+     * 回调状态 0、不开启 1、开启
+     */
+    private Integer cbStatus;
+
+    /**
+     * 回调触发类型
+     */
+    private Integer cbTriggerType;
+
+    /**
+     * 回调的最大执行次数
+     */
+    private int cbMaxCount;
+
+    /**
+     * 回调间隔时间
+     */
+    private String cbTriggerInterval;
 }

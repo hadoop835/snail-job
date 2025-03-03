@@ -8,10 +8,11 @@ import com.aizuda.snailjob.server.common.config.SystemProperties;
 import com.aizuda.snailjob.server.common.schedule.AbstractSchedule;
 import com.aizuda.snailjob.server.common.triple.Triple;
 import com.aizuda.snailjob.template.datasource.persistence.dataobject.DashboardRetryResponseDO;
+import com.aizuda.snailjob.template.datasource.persistence.mapper.RetryMapper;
 import com.aizuda.snailjob.template.datasource.persistence.mapper.RetrySummaryMapper;
-import com.aizuda.snailjob.template.datasource.persistence.mapper.RetryTaskLogMapper;
+import com.aizuda.snailjob.template.datasource.persistence.po.Retry;
 import com.aizuda.snailjob.template.datasource.persistence.po.RetrySummary;
-import com.aizuda.snailjob.template.datasource.persistence.po.RetryTaskLog;
+import com.aizuda.snailjob.template.datasource.persistence.po.RetryTask;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
@@ -34,7 +35,7 @@ import java.util.*;
 @Component
 @RequiredArgsConstructor
 public class RetrySummarySchedule extends AbstractSchedule implements Lifecycle {
-    private final RetryTaskLogMapper retryTaskLogMapper;
+    private final RetryMapper retryMapper;
     private final RetrySummaryMapper retrySummaryMapper;
     private final SystemProperties systemProperties;
 
@@ -61,10 +62,10 @@ public class RetrySummarySchedule extends AbstractSchedule implements Lifecycle 
                 // 重试按日实时查询统计数据（00:00:00 - 23:59:59）
                 LocalDateTime todayFrom = LocalDateTime.of(LocalDate.now(), LocalTime.MIN).plusDays(-i);
                 LocalDateTime todayTo = LocalDateTime.of(LocalDate.now(), LocalTime.MAX).plusDays(-i);
-                LambdaQueryWrapper<RetryTaskLog> wrapper = new LambdaQueryWrapper<RetryTaskLog>()
-                        .between(RetryTaskLog::getCreateDt, todayFrom, todayTo)
-                        .groupBy(RetryTaskLog::getNamespaceId, RetryTaskLog::getGroupName, RetryTaskLog::getSceneName);
-                List<DashboardRetryResponseDO> dashboardRetryResponseDOList = retryTaskLogMapper.selectRetryRetryTaskLogSummaryList(wrapper);
+                LambdaQueryWrapper<Retry> wrapper = new LambdaQueryWrapper<Retry>()
+                        .between(Retry::getCreateDt, todayFrom, todayTo)
+                        .groupBy(Retry::getNamespaceId, Retry::getGroupName, Retry::getSceneName);
+                List<DashboardRetryResponseDO> dashboardRetryResponseDOList = retryMapper.selectRetrySummaryList(wrapper);
                 if (CollUtil.isEmpty(dashboardRetryResponseDOList)) {
                     continue;
                 }

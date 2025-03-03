@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 
 /**
  * 重试日志异常信息记录表
@@ -13,6 +14,7 @@ import lombok.Data;
  */
 @Data
 @TableName("sj_retry_task_log_message")
+@EqualsAndHashCode(callSuper=true)
 public class RetryTaskLogMessage extends CreateDt {
 
     /**
@@ -32,9 +34,14 @@ public class RetryTaskLogMessage extends CreateDt {
     private String groupName;
 
     /**
-     * 同组下id唯一
+     * 重试任务id
      */
-    private String uniqueId;
+    private Long retryTaskId;
+
+    /**
+     * 重试信息Id
+     */
+    private Long retryId;
 
     /**
      * 异常信息

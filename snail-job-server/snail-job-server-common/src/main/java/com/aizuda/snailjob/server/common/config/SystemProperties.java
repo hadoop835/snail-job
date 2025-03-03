@@ -1,6 +1,7 @@
 package com.aizuda.snailjob.server.common.config;
 
 import com.aizuda.snailjob.common.core.alarm.email.SnailJobMailProperties;
+import com.aizuda.snailjob.common.core.constant.SystemConstants;
 import com.aizuda.snailjob.common.core.enums.RpcTypeEnum;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -31,14 +32,14 @@ public class SystemProperties {
     private int retryPullPageSize = 1000;
 
     /**
+     * 重试任务拉取的并行度
+     */
+    private int retryMaxPullParallel = 2;
+
+    /**
      * 任务调度每次拉取的条数
      */
     private int jobPullPageSize = 1000;
-
-    /**
-     * 重试每次拉取的次数
-     */
-    private int retryMaxPullCount = 10;
 
     /**
      * netty 端口
@@ -64,10 +65,11 @@ public class SystemProperties {
      * server token
      */
     private String serverToken = "SJ_H9HGGmrX3QBVTfsAAG2mcKH3SR7bCLsK";
+
     /**
-     * 一个客户端每秒最多接收的重试数量指令
+     * 单个节点支持的最大调度量
      */
-    private int limiter = 100;
+    private int maxDispatchCapacity = 10000;
 
     /**
      * 号段模式下步长配置 默认100
@@ -77,7 +79,7 @@ public class SystemProperties {
     /**
      * 日志默认保存天数
      */
-    private int logStorage = 90;
+    private int logStorage = 7;
 
     /**
      * 合并日志默认保存天数
@@ -99,33 +101,6 @@ public class SystemProperties {
      */
     private int bucketTotal = 128;
 
-    /**
-     * 回调配置
-     */
-    private Callback callback = new Callback();
-
-    /**
-     * 回调配置
-     */
-    @Data
-    public static class Callback {
-
-        /**
-         * 回调uniqueId前缀
-         */
-        String prefix = "CB";
-
-        /**
-         * 回调的最大执行次数
-         */
-        private int maxCount = 288;
-
-        /**
-         * 间隔时间
-         */
-        private long triggerInterval = 15 * 60;
-
-    }
 
     /**
      * Dashboard 任务容错天数

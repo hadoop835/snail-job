@@ -3,29 +3,20 @@ package com.aizuda.snailjob.server.starter.dispatch;
 import akka.actor.AbstractActor;
 import akka.actor.ActorRef;
 import cn.hutool.core.collection.CollUtil;
-import com.aizuda.snailjob.common.core.enums.StatusEnum;
 import com.aizuda.snailjob.common.log.SnailJobLog;
 import com.aizuda.snailjob.server.common.akka.ActorGenerator;
-import com.aizuda.snailjob.server.common.cache.CacheConsumerGroup;
 import com.aizuda.snailjob.server.common.cache.CacheGroupScanActor;
 import com.aizuda.snailjob.server.common.config.SystemProperties;
 import com.aizuda.snailjob.server.common.dto.ScanTask;
 import com.aizuda.snailjob.server.common.enums.SyetemTaskTypeEnum;
-import com.aizuda.snailjob.server.retry.task.support.cache.CacheGroupRateLimiter;
-import com.aizuda.snailjob.template.datasource.access.AccessTemplate;
-import com.aizuda.snailjob.template.datasource.persistence.mapper.ServerNodeMapper;
-import com.aizuda.snailjob.template.datasource.persistence.po.GroupConfig;
-import com.aizuda.snailjob.template.datasource.persistence.po.ServerNode;
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.google.common.cache.Cache;
-import com.google.common.util.concurrent.RateLimiter;
+import com.aizuda.snailjob.server.retry.task.support.handler.RateLimiterHandler;
+import com.google.common.collect.Lists;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.config.ConfigurableBeanFactory;
 import org.springframework.context.annotation.Scope;
 import org.springframework.stereotype.Component;
 
-import java.util.List;
-import java.util.Objects;
+import java.util.*;
 
 /**
  * 消费当前节点分配的bucket并生成扫描任务
@@ -39,11 +30,10 @@ import java.util.Objects;
 @Scope(ConfigurableBeanFactory.SCOPE_PROTOTYPE)
 @RequiredArgsConstructor
 public class ConsumerBucketActor extends AbstractActor {
-    private final AccessTemplate accessTemplate;
-    private final ServerNodeMapper serverNodeMapper;
-    private final SystemProperties systemProperties;
     private static final String DEFAULT_JOB_KEY = "DEFAULT_JOB_KEY";
     private static final String DEFAULT_WORKFLOW_KEY = "DEFAULT_JOB_KEY";
+    private final SystemProperties systemProperties;
+    private final RateLimiterHandler rateLimiterHandler;
 
     @Override
     public Receive createReceive() {
@@ -71,29 +61,20 @@ public class ConsumerBucketActor extends AbstractActor {
     }
 
     private void doScanRetry(final ConsumerBucket consumerBucket) {
-        List<GroupConfig> groupConfigs = null;
-        try {
-            // 查询桶对应组信息
-            groupConfigs = accessTemplate.getGroupConfigAccess().list(
-                    new LambdaQueryWrapper<GroupConfig>()
-                            .select(GroupConfig::getGroupName, GroupConfig::getGroupPartition, GroupConfig::getNamespaceId)
-                            .eq(GroupConfig::getGroupStatus, StatusEnum.YES.getStatus())
-                            .in(GroupConfig::getBucketIndex, consumerBucket.getBuckets())
-            );
-        } catch (Exception e) {
-            SnailJobLog.LOCAL.error("生成重试任务异常.", e);
-        }
 
-        if (CollUtil.isNotEmpty(groupConfigs)) {
-            for (final GroupConfig groupConfig : groupConfigs) {
-                CacheConsumerGroup.addOrUpdate(groupConfig.getGroupName(), groupConfig.getNamespaceId());
-                ScanTask scanTask = new ScanTask();
-                scanTask.setNamespaceId(groupConfig.getNamespaceId());
-                scanTask.setGroupName(groupConfig.getGroupName());
-                scanTask.setBuckets(consumerBucket.getBuckets());
-                scanTask.setGroupPartition(groupConfig.getGroupPartition());
-                produceScanActorTask(scanTask);
-            }
+        // 刷新最新的配置
+        rateLimiterHandler.refreshRate();
+
+        // 通过并行度配置计算拉取范围
+        Set<Integer> totalBuckets = consumerBucket.getBuckets();
+        int retryMaxPullParallel = systemProperties.getRetryMaxPullParallel();
+        List<List<Integer>> partitions = Lists.partition(new ArrayList<>(totalBuckets),
+                (totalBuckets.size() + retryMaxPullParallel - 1) / retryMaxPullParallel);
+        for (List<Integer> buckets : partitions) {
+            ScanTask scanTask = new ScanTask();
+            scanTask.setBuckets(new HashSet<>(buckets));
+            ActorRef scanRetryActorRef = ActorGenerator.scanRetryActor();
+            scanRetryActorRef.tell(scanTask, scanRetryActorRef);
         }
     }
 
@@ -108,44 +89,6 @@ public class ConsumerBucketActor extends AbstractActor {
         // 扫描DAG工作流任务数据
         ActorRef scanWorkflowActorRef = cacheActorRef(DEFAULT_WORKFLOW_KEY, SyetemTaskTypeEnum.WORKFLOW);
         scanWorkflowActorRef.tell(scanTask, scanWorkflowActorRef);
-    }
-
-    /**
-     * 扫描任务生成器
-     *
-     * @param scanTask {@link  ScanTask} 组上下文
-     */
-    private void produceScanActorTask(ScanTask scanTask) {
-
-        String groupName = scanTask.getGroupName();
-
-        // 缓存按照
-        cacheRateLimiter(groupName);
-
-        // 扫描重试数据
-        ActorRef scanRetryActorRef = cacheActorRef(groupName, SyetemTaskTypeEnum.RETRY);
-        scanRetryActorRef.tell(scanTask, scanRetryActorRef);
-
-        // 扫描回调数据
-        ActorRef scanCallbackActorRef = cacheActorRef(groupName, SyetemTaskTypeEnum.CALLBACK);
-        scanCallbackActorRef.tell(scanTask, scanCallbackActorRef);
-
-    }
-
-    /**
-     * 缓存限流对象
-     */
-    private void cacheRateLimiter(String groupName) {
-        List<ServerNode> serverNodes = serverNodeMapper.selectList(new LambdaQueryWrapper<ServerNode>()
-                .eq(ServerNode::getGroupName, groupName));
-        Cache<String, RateLimiter> rateLimiterCache = CacheGroupRateLimiter.getAll();
-        for (ServerNode serverNode : serverNodes) {
-            RateLimiter rateLimiter = rateLimiterCache.getIfPresent(serverNode.getHostId());
-            if (Objects.isNull(rateLimiter)) {
-                rateLimiterCache.put(serverNode.getHostId(), RateLimiter.create(systemProperties.getLimiter()));
-            }
-        }
-
     }
 
     /**

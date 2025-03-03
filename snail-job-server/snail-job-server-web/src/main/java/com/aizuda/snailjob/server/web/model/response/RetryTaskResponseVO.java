@@ -5,41 +5,33 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 /**
- * @author opensnail
- * @date 2022-02-27
- * @since 2.0
+ * @author: opensnail
+ * @date : 2022-02-28 09:09
  */
 @Data
 public class RetryTaskResponseVO {
 
     private Long id;
 
-    private String uniqueId;
-
     private String groupName;
 
     private String sceneName;
 
-    private String idempotentId;
+    private Integer taskStatus;
 
-    private String bizNo;
-
-    private String argsStr;
-
-    private String extAttrs;
-
-    private String executorName;
-
-    private LocalDateTime nextTriggerAt;
-
-    private Integer retryCount;
-
-    private Integer retryStatus;
+    private Long retryId;
 
     private Integer taskType;
 
     private LocalDateTime createDt;
 
-    private LocalDateTime updateDt;
+    private Integer operationReason;
+
+    /**
+     * 客户端ID
+     */
+    private String clientInfo;
+
+    private RetryResponseVO responseVO;
 
 }
