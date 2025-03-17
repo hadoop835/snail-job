@@ -1,6 +1,6 @@
 package com.aizuda.snailjob.server.job.task.support.dispatch;
 
-import akka.actor.AbstractActor;
+import  org.apache.pekko.actor.AbstractActor;
 import cn.hutool.core.collection.CollUtil;
 import com.aizuda.snailjob.common.core.context.SnailSpringContext;
 import com.aizuda.snailjob.common.core.enums.JobTaskBatchStatusEnum;
@@ -83,8 +83,6 @@ public class JobTaskPrepareActor extends AbstractActor {
         for (JobTaskBatch jobTaskBatch : notCompleteJobTaskBatchList) {
             prepare.setExecutionAt(jobTaskBatch.getExecutionAt());
             prepare.setTaskBatchId(jobTaskBatch.getId());
-            prepare.setWorkflowTaskBatchId(prepare.getWorkflowTaskBatchId());
-            prepare.setWorkflowNodeId(jobTaskBatch.getWorkflowNodeId());
             prepare.setOnlyTimeoutCheck(onlyTimeoutCheck);
             for (JobPrepareHandler prepareHandler : prepareHandlers) {
                 if (prepareHandler.matches(jobTaskBatch.getTaskBatchStatus())) {
