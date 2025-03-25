@@ -72,11 +72,6 @@ public class SystemProperties {
     private int maxDispatchCapacity = 10000;
 
     /**
-     * 号段模式下步长配置 默认100
-     */
-    private int step = 100;
-
-    /**
      * 日志默认保存天数
      */
     private int logStorage = 7;
@@ -110,7 +105,7 @@ public class SystemProperties {
     /**
      * rpc类型
      */
-    private RpcTypeEnum rpcType = RpcTypeEnum.NETTY;
+    private RpcTypeEnum rpcType = RpcTypeEnum.GRPC;
 
     /**
      * 邮件配置
