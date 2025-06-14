@@ -3,7 +3,7 @@ package com.aizuda.snailjob.client.job.core.handler.delete;
 import cn.hutool.core.lang.Assert;
 import cn.hutool.core.lang.Pair;
 import com.aizuda.snailjob.client.common.exception.SnailJobClientException;
-import com.aizuda.snailjob.client.job.core.handler.AbstractRequestHandler;
+import com.aizuda.snailjob.client.job.core.handler.AbstractJobRequestHandler;
 import com.aizuda.snailjob.common.core.enums.StatusEnum;
 import com.aizuda.snailjob.common.core.model.Result;
 
@@ -16,7 +16,7 @@ import java.util.Set;
  * @Date：2024/11/21 22:38
  * @Filename：DeleteJobHandler
  */
-public class DeleteJobHandler extends AbstractRequestHandler<Boolean> {
+public class DeleteJobHandler extends AbstractJobRequestHandler<Boolean> {
     private final Set<Long> toDeleteIds;
 
     public DeleteJobHandler(Set<Long> toDeleteIds) {
@@ -43,6 +43,6 @@ public class DeleteJobHandler extends AbstractRequestHandler<Boolean> {
 
     @Override
     protected Pair<Boolean, String> checkRequest() {
-        return Pair.of(toDeleteIds != null && !toDeleteIds.isEmpty() && !toDeleteIds.contains(0L),  "toDeleteId不能为null或0");
+        return Pair.of(toDeleteIds != null && !toDeleteIds.isEmpty() && !toDeleteIds.contains(0L),  "toDeleteId cannot be null or 0");
     }
 }

@@ -21,6 +21,7 @@ import com.aizuda.snailjob.server.common.rpc.client.annotation.Body;
 import com.aizuda.snailjob.server.common.rpc.client.annotation.Header;
 import com.aizuda.snailjob.server.common.rpc.client.annotation.Mapping;
 import com.aizuda.snailjob.server.common.rpc.client.annotation.Param;
+import com.aizuda.snailjob.server.common.rpc.client.netty.NettyChannel;
 import com.github.rholder.retry.*;
 import io.netty.handler.codec.http.DefaultHttpHeaders;
 import io.netty.handler.codec.http.HttpHeaders;
@@ -150,7 +151,7 @@ public class RpcClientInvokeHandler implements InvocationHandler {
                     sw.stop();
                 }
 
-                SnailJobLog.LOCAL.debug("request complete requestId:[{}] 耗时:[{}ms]", snailJobRequest.getReqId(),
+                SnailJobLog.LOCAL.debug("Request complete requestId:[{}] took [{}ms]", snailJobRequest.getReqId(),
                         sw.getTotalTimeMillis());
                 if (async) {
                     // 暂时不支持异步调用

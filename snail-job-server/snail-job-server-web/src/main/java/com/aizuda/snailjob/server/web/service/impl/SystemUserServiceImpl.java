@@ -7,6 +7,7 @@ import cn.hutool.crypto.SecureUtil;
 import com.aizuda.snailjob.common.core.util.JsonUtil;
 import com.aizuda.snailjob.common.core.util.StreamUtils;
 import com.aizuda.snailjob.server.common.exception.SnailJobServerException;
+import com.aizuda.snailjob.server.web.model.request.UserSessionVO;
 import com.aizuda.snailjob.server.web.annotation.RoleEnum;
 import com.aizuda.snailjob.server.web.model.base.PageResult;
 import com.aizuda.snailjob.server.web.model.request.*;
@@ -54,11 +55,11 @@ public class SystemUserServiceImpl implements SystemUserService {
 
     private static void validateUserPassword(SystemUserRequestVO requestVO, SystemUser systemUser) {
         if (Objects.isNull(systemUser)) {
-            throw new SnailJobServerException("用户名或密码错误");
+            throw new SnailJobServerException("Incorrect username or password");
         }
 
         if (!SecureUtil.sha256(requestVO.getPassword()).equals(systemUser.getPassword())) {
-            throw new SnailJobServerException("用户名或密码错误");
+            throw new SnailJobServerException("Incorrect username or password");
         }
     }
 
@@ -113,7 +114,7 @@ public class SystemUserServiceImpl implements SystemUserService {
         long count = systemUserMapper.selectCount(
                 new LambdaQueryWrapper<SystemUser>().eq(SystemUser::getUsername, requestVO.getUsername()));
         if (count > 0) {
-            throw new SnailJobServerException("该用户已存在");
+            throw new SnailJobServerException("User already exists");
         }
 
         SystemUser systemUser = new SystemUser();
@@ -121,7 +122,7 @@ public class SystemUserServiceImpl implements SystemUserService {
         systemUser.setPassword(SecureUtil.sha256(requestVO.getPassword()));
         systemUser.setRole(requestVO.getRole());
 
-        Assert.isTrue(1 == systemUserMapper.insert(systemUser), () -> new SnailJobServerException("新增用户失败"));
+        Assert.isTrue(1 == systemUserMapper.insert(systemUser), () -> new SnailJobServerException("Failed to add user"));
 
         // 只添加为普通用户添加权限
         List<UserPermissionRequestVO> groupNameList = requestVO.getPermissions();
@@ -135,7 +136,7 @@ public class SystemUserServiceImpl implements SystemUserService {
             systemUserPermission.setGroupName(permission.getGroupName());
             systemUserPermission.setNamespaceId(permission.getNamespaceId());
             Assert.isTrue(1 == systemUserPermissionMapper.insert(systemUserPermission),
-                    () -> new SnailJobServerException("新增用户权限失败"));
+                    () -> new SnailJobServerException("Failed to add user permissions"));
         }
 
     }
@@ -146,14 +147,14 @@ public class SystemUserServiceImpl implements SystemUserService {
         SystemUser systemUser = systemUserMapper.selectOne(
                 new LambdaQueryWrapper<SystemUser>().eq(SystemUser::getId, requestVO.getId()));
         if (Objects.isNull(systemUser)) {
-            throw new SnailJobServerException("该用户不存在");
+            throw new SnailJobServerException("User does not exist");
         }
 
         if (!systemUser.getUsername().equals(requestVO.getUsername())) {
             long count = systemUserMapper.selectCount(
                     new LambdaQueryWrapper<SystemUser>().eq(SystemUser::getUsername, requestVO.getUsername()));
             if (count > 0) {
-                throw new SnailJobServerException("该用户已存在");
+                throw new SnailJobServerException("User already exists");
             }
         }
 
@@ -164,7 +165,7 @@ public class SystemUserServiceImpl implements SystemUserService {
 
         systemUser.setRole(requestVO.getRole());
 
-        Assert.isTrue(1 == systemUserMapper.updateById(systemUser), () -> new SnailJobServerException("更新用户失败"));
+        Assert.isTrue(1 == systemUserMapper.updateById(systemUser), () -> new SnailJobServerException("Failed to update user"));
 
         // 只添加为普通用户添加权限
         List<UserPermissionRequestVO> permissions = requestVO.getPermissions();
@@ -181,7 +182,7 @@ public class SystemUserServiceImpl implements SystemUserService {
             systemUserPermission.setGroupName(permission.getGroupName());
             systemUserPermission.setNamespaceId(permission.getNamespaceId());
             Assert.isTrue(1 == systemUserPermissionMapper.insert(systemUserPermission),
-                    () -> new SnailJobServerException("更新用户权限失败"));
+                    () -> new SnailJobServerException("Failed to update user permissions"));
         }
     }
 
@@ -241,7 +242,7 @@ public class SystemUserServiceImpl implements SystemUserService {
         SystemUser systemUser = systemUserMapper.selectOne(
                 new LambdaQueryWrapper<SystemUser>().eq(SystemUser::getUsername, username));
         if (Objects.isNull(systemUser)) {
-            throw new SnailJobServerException("用户不存在");
+            throw new SnailJobServerException("User does not exist");
         }
 
         SystemUserResponseVO responseVO = SystemUserResponseVOConverter.INSTANCE.convert(systemUser);
@@ -295,13 +296,13 @@ public class SystemUserServiceImpl implements SystemUserService {
         SystemUser systemUser = systemUserMapper.selectOne(
                 new LambdaQueryWrapper<SystemUser>().eq(SystemUser::getId, userId));
         if (Objects.isNull(systemUser)) {
-            throw new SnailJobServerException("该用户不存在");
+            throw new SnailJobServerException("User does not exist");
         }
         if (!SecureUtil.sha256(requestVO.getOldPassword()).equals(systemUser.getPassword())) {
-            throw new SnailJobServerException("用户原密码错误");
+            throw new SnailJobServerException("Incorrect original user password");
         }
         systemUser.setPassword(SecureUtil.sha256(requestVO.getNewPassword()));
-        Assert.isTrue(1 == systemUserMapper.updateById(systemUser), () -> new SnailJobServerException("更新用户密码失败"));
+        Assert.isTrue(1 == systemUserMapper.updateById(systemUser), () -> new SnailJobServerException("Failed to update user password"));
     }
 
     @Override

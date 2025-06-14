@@ -25,19 +25,21 @@ import com.aizuda.snailjob.server.common.util.CronUtils;
 import com.aizuda.snailjob.server.common.util.DateUtils;
 import com.aizuda.snailjob.server.common.util.GraphUtils;
 import com.aizuda.snailjob.server.common.util.PartitionTaskUtils;
+import com.aizuda.snailjob.server.web.model.request.UserSessionVO;
+import com.aizuda.snailjob.server.common.vo.request.WorkflowRequestVO;
 import com.aizuda.snailjob.server.job.task.dto.WorkflowTaskPrepareDTO;
 import com.aizuda.snailjob.server.job.task.support.WorkflowPrePareHandler;
 import com.aizuda.snailjob.server.job.task.support.WorkflowTaskConverter;
 import com.aizuda.snailjob.server.job.task.support.expression.ExpressionInvocationHandler;
 import com.aizuda.snailjob.server.web.model.base.PageResult;
 import com.aizuda.snailjob.server.web.model.request.*;
-import com.aizuda.snailjob.server.web.model.request.WorkflowRequestVO.NodeConfig;
-import com.aizuda.snailjob.server.web.model.response.WorkflowDetailResponseVO;
-import com.aizuda.snailjob.server.web.model.response.WorkflowResponseVO;
+import com.aizuda.snailjob.server.common.vo.request.WorkflowRequestVO.NodeConfig;
+import com.aizuda.snailjob.server.common.vo.WorkflowDetailResponseVO;
+import com.aizuda.snailjob.server.common.vo.WorkflowResponseVO;
 import com.aizuda.snailjob.server.web.service.WorkflowService;
-import com.aizuda.snailjob.server.web.service.convert.WorkflowConverter;
+import com.aizuda.snailjob.server.common.convert.WorkflowConverter;
 import com.aizuda.snailjob.server.web.service.handler.GroupHandler;
-import com.aizuda.snailjob.server.web.service.handler.WorkflowHandler;
+import com.aizuda.snailjob.server.common.handler.WorkflowHandler;
 import com.aizuda.snailjob.server.web.util.UserSessionUtils;
 import com.aizuda.snailjob.template.datasource.access.AccessTemplate;
 import com.aizuda.snailjob.template.datasource.persistence.mapper.JobMapper;
@@ -48,7 +50,6 @@ import com.aizuda.snailjob.template.datasource.persistence.po.*;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.PageDTO;
 import com.google.common.collect.Lists;
-import com.google.common.collect.Sets;
 import com.google.common.graph.ElementOrder;
 import com.google.common.graph.GraphBuilder;
 import com.google.common.graph.MutableGraph;
@@ -101,11 +102,11 @@ public class WorkflowServiceImpl implements WorkflowService {
                         WaitStrategies.WaitStrategyEnum.RANDOM.getType())
                 .contains(requestVO.getTriggerType())) {
             if (Integer.parseInt(requestVO.getTriggerInterval()) < 10) {
-                throw new SnailJobServerException("触发间隔不得小于10");
+                throw new SnailJobServerException("Trigger interval must not be less than 10");
             }
         } else if (requestVO.getTriggerType() == WaitStrategies.WaitStrategyEnum.CRON.getType()) {
             if (CronUtils.getExecuteInterval(requestVO.getTriggerInterval()) < 10 * 1000) {
-                throw new SnailJobServerException("触发间隔不得小于10");
+                throw new SnailJobServerException("Trigger interval must not be less than 10");
             }
         }
     }
@@ -113,7 +114,7 @@ public class WorkflowServiceImpl implements WorkflowService {
     @Override
     @Transactional
     public boolean saveWorkflow(WorkflowRequestVO workflowRequestVO) {
-        log.info("保存工作流信息：{}", JsonUtil.toJsonString(workflowRequestVO));
+        log.info("Saved workflow information: {}", JsonUtil.toJsonString(workflowRequestVO));
         MutableGraph<Long> graph = createGraph();
 
         // 添加虚拟头节点
@@ -129,7 +130,7 @@ public class WorkflowServiceImpl implements WorkflowService {
                         % systemProperties.getBucketTotal());
         workflow.setNamespaceId(UserSessionUtils.currentUserSession().getNamespaceId());
         workflow.setId(null);
-        Assert.isTrue(1 == workflowMapper.insert(workflow), () -> new SnailJobServerException("新增工作流失败"));
+        Assert.isTrue(1 == workflowMapper.insert(workflow), () -> new SnailJobServerException("Failed to add workflow"));
 
         // 获取DAG节点配置
         NodeConfig nodeConfig = workflowRequestVO.getNodeConfig();
@@ -140,12 +141,12 @@ public class WorkflowServiceImpl implements WorkflowService {
                 workflowRequestVO.getGroupName(),
                 workflow.getId(), nodeConfig, graph,
                 workflow.getVersion());
-        log.info("图构建完成. graph:[{}]", graph);
+        log.info("Graph construction complete. graph:[{}]", graph);
 
         // 保存图信息
         workflow.setVersion(null);
         workflow.setFlowInfo(JsonUtil.toJsonString(GraphUtils.serializeGraphToJson(graph)));
-        Assert.isTrue(1 == workflowMapper.updateById(workflow), () -> new SnailJobServerException("保存工作流图失败"));
+        Assert.isTrue(1 == workflowMapper.updateById(workflow), () -> new SnailJobServerException("Failed to save workflow graph"));
         return true;
     }
 
@@ -199,10 +200,10 @@ public class WorkflowServiceImpl implements WorkflowService {
     @Transactional
     public Boolean updateWorkflow(WorkflowRequestVO workflowRequestVO) {
 
-        Assert.notNull(workflowRequestVO.getId(), () -> new SnailJobServerException("工作流ID不能为空"));
+        Assert.notNull(workflowRequestVO.getId(), () -> new SnailJobServerException("Workflow ID cannot be null"));
 
         Workflow workflow = workflowMapper.selectById(workflowRequestVO.getId());
-        Assert.notNull(workflow, () -> new SnailJobServerException("工作流不存在"));
+        Assert.notNull(workflow, () -> new SnailJobServerException("Workflow does not exist"));
 
         MutableGraph<Long> graph = createGraph();
 
@@ -217,7 +218,7 @@ public class WorkflowServiceImpl implements WorkflowService {
         workflowHandler.buildGraph(Lists.newArrayList(SystemConstants.ROOT), new LinkedBlockingDeque<>(),
                 workflowRequestVO.getGroupName(), workflowRequestVO.getId(), nodeConfig, graph, version + 1);
 
-        log.info("图构建完成. graph:[{}]", graph);
+        log.info("Graph construction complete. graph:[{}]", graph);
 
         // 保存图信息
         workflow = WorkflowConverter.INSTANCE.convert(workflowRequestVO);
@@ -232,7 +233,7 @@ public class WorkflowServiceImpl implements WorkflowService {
                         new LambdaQueryWrapper<Workflow>()
                                 .eq(Workflow::getId, workflow.getId())
                                 .eq(Workflow::getVersion, version)) > 0,
-                () -> new SnailJobServerException("更新失败"));
+                () -> new SnailJobServerException("Update failed"));
 
         return Boolean.TRUE;
     }
@@ -243,7 +244,7 @@ public class WorkflowServiceImpl implements WorkflowService {
                 new LambdaQueryWrapper<Workflow>()
                         .select(Workflow::getId, Workflow::getWorkflowStatus)
                         .eq(Workflow::getId, id));
-        Assert.notNull(workflow, () -> new SnailJobServerException("工作流不存在"));
+        Assert.notNull(workflow, () -> new SnailJobServerException("Workflow does not exist"));
 
         if (Objects.equals(workflow.getWorkflowStatus(), StatusEnum.NO.getStatus())) {
             workflow.setWorkflowStatus(StatusEnum.YES.getStatus());
@@ -267,7 +268,7 @@ public class WorkflowServiceImpl implements WorkflowService {
         );
 
         Assert.isTrue(count > 0,
-                () -> new SnailJobServerException("组:[{}]已经关闭，不支持手动执行.", workflow.getGroupName()));
+                () -> new SnailJobServerException("Group [{}] is closed, manual execution is not supported.", workflow.getGroupName()));
 
         WorkflowTaskPrepareDTO prepareDTO = WorkflowTaskConverter.INSTANCE.toWorkflowTaskPrepareDTO(workflow);
         // 设置now表示立即执行
@@ -288,7 +289,7 @@ public class WorkflowServiceImpl implements WorkflowService {
                 new PageDTO<>(1, 100),
                 new LambdaQueryWrapper<Workflow>()
                         .select(Workflow::getId, Workflow::getWorkflowName)
-                        .likeRight(StrUtil.isNotBlank(keywords), Workflow::getWorkflowName, StrUtil.trim(keywords))
+                        .like(StrUtil.isNotBlank(keywords), Workflow::getWorkflowName, StrUtil.trim(keywords))
                         .eq(Objects.nonNull(workflowId), Workflow::getId, workflowId)
                         .eq(StrUtil.isNotBlank(groupName), Workflow::getGroupName, groupName)
                         .eq(Workflow::getDeleted, StatusEnum.NO.getStatus())
@@ -301,13 +302,13 @@ public class WorkflowServiceImpl implements WorkflowService {
     public Pair<Integer, Object> checkNodeExpression(CheckDecisionVO decisionVO) {
         try {
             ExpressionEngine realExpressionEngine = ExpressionTypeEnum.valueOf(decisionVO.getExpressionType());
-            Assert.notNull(realExpressionEngine, () -> new SnailJobServerException("表达式引擎不存在"));
+            Assert.notNull(realExpressionEngine, () -> new SnailJobServerException("Expression engine does not exist"));
             ExpressionInvocationHandler invocationHandler = new ExpressionInvocationHandler(realExpressionEngine);
             ExpressionEngine expressionEngine = ExpressionFactory.getExpressionEngine(invocationHandler);
             Object eval = expressionEngine.eval(decisionVO.getNodeExpression(), decisionVO.getCheckContent());
             return Pair.of(StatusEnum.YES.getStatus(), eval);
         } catch (Exception e) {
-            SnailJobLog.LOCAL.error("表达式异常. [{}]", decisionVO.getNodeExpression(), e);
+            SnailJobLog.LOCAL.error("Expression exception. [{}]", decisionVO.getNodeExpression(), e);
             return Pair.of(StatusEnum.NO.getStatus(), e.getMessage());
         }
     }
@@ -324,7 +325,7 @@ public class WorkflowServiceImpl implements WorkflowService {
 
         List<WorkflowDetailResponseVO> resultList = new ArrayList<>();
         PartitionTaskUtils.process(startId -> {
-            List<Workflow> workflowList = workflowMapper.selectPage(new PageDTO<>(0, 100),
+            List<Workflow> workflowList = workflowMapper.selectPage(new PageDTO<>(0, 100, Boolean.FALSE),
                     new LambdaQueryWrapper<Workflow>()
                             .eq(Workflow::getNamespaceId, UserSessionUtils.currentUserSession().getNamespaceId())
                             .eq(Workflow::getDeleted, StatusEnum.NO.getStatus())
@@ -359,7 +360,7 @@ public class WorkflowServiceImpl implements WorkflowService {
                         .eq(Workflow::getNamespaceId, namespaceId)
                         .eq(Workflow::getWorkflowStatus, StatusEnum.NO.getStatus())
                         .in(Workflow::getId, ids)
-        ), () -> new SnailJobServerException("删除工作流任务失败, 请检查任务状态是否关闭状态"));
+        ), () -> new SnailJobServerException("Failed to delete workflow task, please check if the task status is closed"));
 
         List<JobSummary> jobSummaries = jobSummaryMapper.selectList(new LambdaQueryWrapper<JobSummary>()
                 .select(JobSummary::getId)
@@ -370,7 +371,7 @@ public class WorkflowServiceImpl implements WorkflowService {
         if (CollUtil.isNotEmpty(jobSummaries)) {
             Assert.isTrue(jobSummaries.size() ==
                             jobSummaryMapper.deleteByIds(StreamUtils.toSet(jobSummaries, JobSummary::getId)),
-                    () -> new SnailJobServerException("汇总表删除失败")
+                    () -> new SnailJobServerException("Summary table deletion failed")
             );
         }
         return Boolean.TRUE;
@@ -421,8 +422,8 @@ public class WorkflowServiceImpl implements WorkflowService {
                     workflowNodeMap);
             responseVO.setNodeConfig(config);
         } catch (Exception e) {
-            log.error("反序列化失败. json:[{}]", flowInfo, e);
-            throw new SnailJobServerException("查询工作流详情失败");
+            log.error("Deserialization failed. json:[{}]", flowInfo, e);
+            throw new SnailJobServerException("Failed to query workflow details");
         }
         return responseVO;
     }

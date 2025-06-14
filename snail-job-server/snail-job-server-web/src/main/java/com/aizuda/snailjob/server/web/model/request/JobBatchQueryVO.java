@@ -1,6 +1,6 @@
 package com.aizuda.snailjob.server.web.model.request;
 
-import com.aizuda.snailjob.server.web.model.base.BaseQueryVO;
+import com.aizuda.snailjob.server.common.vo.base.BaseQueryVO;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
@@ -15,7 +15,6 @@ import java.util.List;
 @Data
 public class JobBatchQueryVO extends BaseQueryVO {
     private Long jobId;
-    private String jobName;
     private List<Integer> taskBatchStatus;
     private String groupName;
 }

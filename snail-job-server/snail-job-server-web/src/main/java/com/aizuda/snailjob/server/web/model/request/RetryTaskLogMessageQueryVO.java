@@ -1,6 +1,6 @@
 package com.aizuda.snailjob.server.web.model.request;
 
-import com.aizuda.snailjob.server.web.model.base.BaseQueryVO;
+import com.aizuda.snailjob.server.common.vo.base.BaseQueryVO;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
@@ -13,10 +13,8 @@ import lombok.EqualsAndHashCode;
 public class RetryTaskLogMessageQueryVO extends BaseQueryVO {
 
     private String groupName;
-
     private Long retryTaskId;
+    private Long startRealTime;
+    private String sid;
 
-    private Long startId;
-
-    private Integer fromIndex;
 }

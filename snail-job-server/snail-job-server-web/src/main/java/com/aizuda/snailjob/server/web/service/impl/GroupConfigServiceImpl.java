@@ -2,12 +2,12 @@ package com.aizuda.snailjob.server.web.service.impl;
 
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.lang.Assert;
-import cn.hutool.core.util.HashUtil;
 import cn.hutool.core.util.ReUtil;
 import cn.hutool.core.util.StrUtil;
 import com.aizuda.snailjob.common.core.enums.StatusEnum;
 import com.aizuda.snailjob.common.core.util.JsonUtil;
 import com.aizuda.snailjob.common.core.util.StreamUtils;
+import com.aizuda.snailjob.common.log.SnailJobLog;
 import com.aizuda.snailjob.server.common.config.SystemProperties;
 import com.aizuda.snailjob.server.common.dto.PartitionTask;
 import com.aizuda.snailjob.server.common.enums.IdGeneratorModeEnum;
@@ -85,7 +85,7 @@ public class GroupConfigServiceImpl implements GroupConfigService {
         Assert.isTrue(groupConfigAccess.count(new LambdaQueryWrapper<GroupConfig>()
                         .eq(GroupConfig::getNamespaceId, namespaceId)
                         .eq(GroupConfig::getGroupName, groupConfigRequestVO.getGroupName())) == 0,
-                () -> new SnailJobServerException("GroupName已经存在 {}", groupConfigRequestVO.getGroupName()));
+                () -> new SnailJobServerException("GroupName already exists {}", groupConfigRequestVO.getGroupName()));
 
         // 保存组配置
         return doSaveGroupConfig(namespaceId, groupConfigRequestVO);
@@ -95,12 +95,6 @@ public class GroupConfigServiceImpl implements GroupConfigService {
     @Override
     @Transactional
     public Boolean updateGroup(GroupConfigRequestVO groupConfigRequestVO) {
-
-        List<Integer> tablePartitionList = getTablePartitionList();
-        if (CollUtil.isEmpty(tablePartitionList)) {
-            return Boolean.FALSE;
-        }
-
         String groupName = groupConfigRequestVO.getGroupName();
         String namespaceId = UserSessionUtils.currentUserSession().getNamespaceId();
 
@@ -114,16 +108,12 @@ public class GroupConfigServiceImpl implements GroupConfigService {
         }
 
         GroupConfig groupConfig = GroupConfigConverter.INSTANCE.toGroupConfig(groupConfigRequestVO);
+        //描述
         groupConfig.setDescription(Optional.ofNullable(groupConfigRequestVO.getDescription()).orElse(StrUtil.EMPTY));
         // 使用@TableField(value = "version", update= "%s+1") 进行更新version, 这里必须初始化一个值
         groupConfig.setVersion(1);
         // 不允许更新token
         groupConfig.setToken(null);
-        Assert.isTrue(tablePartitionList.contains(groupConfigRequestVO.getGroupPartition()),
-                () -> new SnailJobServerException("分区不存在. [{}]", tablePartitionList));
-        Assert.isTrue(groupConfigRequestVO.getGroupPartition() >= 0,
-                () -> new SnailJobServerException("分区不能是负数."));
-
         // 不允许更新组
         groupConfig.setGroupName(null);
         Assert.isTrue(1 == groupConfigAccess.update(groupConfig,
@@ -205,7 +195,7 @@ public class GroupConfigServiceImpl implements GroupConfigService {
         groupConfig.setDescription(Optional.ofNullable(groupConfigRequestVO.getDescription()).orElse(StrUtil.EMPTY));
         ConfigAccess<GroupConfig> groupConfigAccess = accessTemplate.getGroupConfigAccess();
         Assert.isTrue(1 == groupConfigAccess.insert(groupConfig),
-                () -> new SnailJobServerException("新增组异常异常 groupConfigVO[{}]", groupConfigRequestVO));
+                () -> new SnailJobServerException("Group addition exception groupConfigVO[{}]", groupConfigRequestVO));
 
         return Boolean.TRUE;
     }
@@ -312,6 +302,7 @@ public class GroupConfigServiceImpl implements GroupConfigService {
                     .distinct()
                     .collect(Collectors.toList());
         } catch (SQLException ignored) {
+            SnailJobLog.LOCAL.error("getTablePartitionList method error", ignored);
         }
 
         return Collections.emptyList();
@@ -331,7 +322,7 @@ public class GroupConfigServiceImpl implements GroupConfigService {
                 .in(GroupConfig::getGroupName, groupSet));
 
         Assert.isTrue(CollUtil.isEmpty(configs),
-                () -> new SnailJobServerException("导入失败. 原因: 组{}已存在", StreamUtils.toSet(configs, GroupConfig::getGroupName)));
+                () -> new SnailJobServerException("Import failed. Reason: Group {} already exists", StreamUtils.toSet(configs, GroupConfig::getGroupName)));
 
         for (final GroupConfigRequestVO groupConfigRequestVO : requestList) {
 
@@ -348,7 +339,7 @@ public class GroupConfigServiceImpl implements GroupConfigService {
 
         List<GroupConfigRequestVO> allRequestList = Lists.newArrayList();
         PartitionTaskUtils.process((startId -> {
-            List<GroupConfig> groupConfigs = accessTemplate.getGroupConfigAccess().listPage(new PageDTO<>(0, 100),
+            List<GroupConfig> groupConfigs = accessTemplate.getGroupConfigAccess().listPage(new PageDTO<>(0, 100, Boolean.FALSE),
                     new LambdaQueryWrapper<GroupConfig>()
                             .ge(GroupConfig::getId, startId)
                             .eq(GroupConfig::getNamespaceId, namespaceId)
@@ -375,34 +366,34 @@ public class GroupConfigServiceImpl implements GroupConfigService {
         Assert.isTrue(CollUtil.isEmpty(jobMapper.selectList(new PageDTO<>(1, 1), new LambdaQueryWrapper<Job>()
                         .eq(Job::getNamespaceId, namespaceId)
                         .eq(Job::getGroupName, groupName).orderByAsc(Job::getId))),
-                () -> new SnailJobServerException("存在未删除的定时任务. 请先删除当前组的定时任务后再重试删除"));
+                () -> new SnailJobServerException("There are undeleted scheduled tasks. Please delete the current group's scheduled tasks before retrying deletion"));
         // 2. 工作流是否删除
         Assert.isTrue(CollUtil.isEmpty(workflowMapper.selectList(new PageDTO<>(1, 1), new LambdaQueryWrapper<Workflow>()
                         .eq(Workflow::getNamespaceId, namespaceId)
                         .eq(Workflow::getGroupName, groupName).orderByAsc(Workflow::getId))),
-                () -> new SnailJobServerException("存在未删除的工作流任务. 请先删除当前组的工作流任务后再重试删除"));
+                () -> new SnailJobServerException("There are undeleted workflow tasks. Please delete the current group's workflow tasks before retrying deletion"));
         // 3. 重试场景是否删除
         Assert.isTrue(CollUtil.isEmpty(accessTemplate.getSceneConfigAccess().listPage(new PageDTO<>(1, 1), new LambdaQueryWrapper<RetrySceneConfig>()
                         .eq(RetrySceneConfig::getNamespaceId, namespaceId)
                         .eq(RetrySceneConfig::getGroupName, groupName).orderByAsc(RetrySceneConfig::getId)).getRecords()),
-                () -> new SnailJobServerException("存在未删除的重试场景. 请先删除当前组的重试场景后再重试删除"));
+                () -> new SnailJobServerException("There are undeleted retry scenes. Please delete the current group's retry scenes before retrying deletion"));
         // 4. 是否存在已分配的权限
         Assert.isTrue(CollUtil.isEmpty(systemUserPermissionMapper.selectList(new PageDTO<>(1, 1), new LambdaQueryWrapper<SystemUserPermission>()
                         .eq(SystemUserPermission::getNamespaceId, namespaceId)
                         .eq(SystemUserPermission::getGroupName, groupName).orderByAsc(SystemUserPermission::getId))),
-                () -> new SnailJobServerException("存在已分配组权限. 请先删除已分配的组权限后再重试删除"));
+                () -> new SnailJobServerException("There are allocated group permissions. Please delete the allocated group permissions before retrying deletion"));
         // 5. 检查是否存活的客户端节点
         Assert.isTrue(CollUtil.isEmpty(serverNodeMapper.selectList(new PageDTO<>(1, 1), new LambdaQueryWrapper<ServerNode>()
                         .eq(ServerNode::getNamespaceId, namespaceId)
                         .eq(ServerNode::getGroupName, groupName).orderByAsc(ServerNode::getId))),
-                () -> new SnailJobServerException("存在存活中客户端节点."));
+                () -> new SnailJobServerException("There are live client nodes."));
 
         Assert.isTrue(1 == accessTemplate.getGroupConfigAccess().delete(
                         new LambdaQueryWrapper<GroupConfig>()
                                 .eq(GroupConfig::getNamespaceId, namespaceId)
                                 .eq(GroupConfig::getGroupStatus, StatusEnum.NO.getStatus())
                                 .eq(GroupConfig::getGroupName, groupName)),
-                () -> new SnailJobServerException("删除组失败, 请检查状态是否关闭状态"));
+                () -> new SnailJobServerException("Failed to delete group, please check if the status is closed"));
 
         return Boolean.TRUE;
     }

@@ -125,6 +125,8 @@ public abstract class AbstractGenerator implements TaskGenerator {
         retry.setGroupName(taskContext.getGroupName());
         retry.setSceneName(taskContext.getSceneName());
         retry.setRetryStatus(initStatus(taskContext));
+        retry.setSceneId(taskContext.getSceneId());
+        retry.setGroupId(taskContext.getGroupId());
         retry.setParentId(0L);
         retry.setDeleted(0L);
         if (StrUtil.isBlank(retry.getBizNo())) {
@@ -170,15 +172,7 @@ public abstract class AbstractGenerator implements TaskGenerator {
                 .getSceneConfigByGroupNameAndSceneName(taskContext.getGroupName(), taskContext.getSceneName(),
                         taskContext.getNamespaceId());
         if (Objects.isNull(retrySceneConfig)) {
-
-            GroupConfig groupConfig = accessTemplate.getGroupConfigAccess()
-                    .getGroupConfigByGroupName(taskContext.getGroupName(), taskContext.getNamespaceId());
-            if (Objects.isNull(groupConfig)) {
-                throw new SnailJobServerException(
-                        "failed to report data, no group configuration found. groupName:[{}]", taskContext.getGroupName());
-            }
-
-            if (groupConfig.getInitScene().equals(StatusEnum.NO.getStatus())) {
+            if (taskContext.getInitScene().equals(StatusEnum.NO.getStatus())) {
                 throw new SnailJobServerException(
                         "failed to report data, no scene configuration found. groupName:[{}] sceneName:[{}]",
                         taskContext.getGroupName(), taskContext.getSceneName());
@@ -188,6 +182,7 @@ public abstract class AbstractGenerator implements TaskGenerator {
             }
         }
 
+        taskContext.setSceneId(retrySceneConfig.getId());
         return retrySceneConfig;
 
     }
@@ -209,7 +204,7 @@ public abstract class AbstractGenerator implements TaskGenerator {
         retrySceneConfig.setMaxRetryCount(DelayLevelEnum._21.getLevel());
         retrySceneConfig.setCbStatus(StatusEnum.NO.getStatus());
         retrySceneConfig.setCbMaxCount(DelayLevelEnum._16.getLevel());
-        retrySceneConfig.setDescription("自动初始化场景");
+        retrySceneConfig.setDescription("Automatically initialize scenario");
         Assert.isTrue(1 == accessTemplate.getSceneConfigAccess().insert(retrySceneConfig),
                 () -> new SnailJobServerException("init scene error"));
         return retrySceneConfig;

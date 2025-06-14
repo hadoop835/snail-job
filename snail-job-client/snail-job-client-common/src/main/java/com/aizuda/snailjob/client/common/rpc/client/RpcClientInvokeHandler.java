@@ -5,6 +5,7 @@ import cn.hutool.core.lang.Assert;
 import com.aizuda.snailjob.client.common.annotation.Mapping;
 import com.aizuda.snailjob.client.common.exception.SnailJobClientException;
 import com.aizuda.snailjob.client.common.exception.SnailJobClientTimeOutException;
+import com.aizuda.snailjob.client.common.rpc.client.netty.NettyChannel;
 import com.aizuda.snailjob.common.core.enums.StatusEnum;
 import com.aizuda.snailjob.common.core.model.SnailJobRpcResult;
 import com.aizuda.snailjob.common.core.model.Result;
@@ -62,7 +63,7 @@ public class RpcClientInvokeHandler<R extends Result<Object>> implements Invocat
             sw.stop();
         }
 
-        SnailJobLog.LOCAL.debug("request complete requestId:[{}] 耗时:[{}ms]", snailJobRequest.getReqId(), sw.getTotalTimeMillis());
+        SnailJobLog.LOCAL.debug("Request complete requestId:[{}] took [{}ms]", snailJobRequest.getReqId(), sw.getTotalTimeMillis());
         if (async) {
             newFuture.whenComplete((r, t) -> {
                 if (Objects.nonNull(t)) {

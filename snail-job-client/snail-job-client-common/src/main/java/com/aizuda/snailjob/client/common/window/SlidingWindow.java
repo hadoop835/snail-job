@@ -5,6 +5,7 @@ import com.aizuda.snailjob.common.core.util.JsonUtil;
 import com.aizuda.snailjob.common.core.window.Listener;
 import com.aizuda.snailjob.common.log.SnailJobLog;
 import org.springframework.util.Assert;
+import org.springframework.util.CollectionUtils;
 
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
@@ -102,14 +103,11 @@ public class SlidingWindow<T> {
                     ConcurrentLinkedQueue<T> list = new ConcurrentLinkedQueue<>();
                     list.add(data);
 
-                    SnailJobLog.LOCAL.debug("添加新数据 [{}] [{}] size:[{}]", windowPeriod, Thread.currentThread().getName(), list.size());
+                    SnailJobLog.LOCAL.debug("Adding new data [{}] [{}] size:[{}]", windowPeriod, Thread.currentThread().getName(), list.size());
                     saveData.put(windowPeriod, list);
 
                     // 扫描n-1个窗口，是否过期，过期则删除
                     removeInvalidWindow();
-
-                    // 超过窗口阈值预警
-                    alarmWindowTotal();
 
                 } else {
                     oldWindowAdd(data);
@@ -130,16 +128,16 @@ public class SlidingWindow<T> {
      */
     private void alarmWindowTotal() {
         if (saveData.size() > windowTotalThreshold) {
-            SnailJobLog.LOCAL.warn("当前存活的窗口数量过多 总量:[{}] > 阈值:[{}] ", saveData.size(), windowTotalThreshold);
+            SnailJobLog.LOCAL.warn(" The number of currently active windows is too high Total:[{}] > Threshold:[{}]", saveData.size(), windowTotalThreshold);
         }
     }
 
     /**
-     * 扫描n-1个窗口，是否过期，过期则删除 过期条件为窗口期内无数据
+     * 扫描n-2个窗口，是否过期，过期则删除 过期条件为窗口期内无数据
      */
     private void removeInvalidWindow() {
 
-        for (int i = 0; i < saveData.size() - 1; i++) {
+        for (int i = 0; i < saveData.size() - 2; i++) {
             Map.Entry<LocalDateTime, ConcurrentLinkedQueue<T>> firstEntry = saveData.firstEntry();
             if (CollUtil.isEmpty(firstEntry.getValue())) {
                 saveData.remove(firstEntry.getKey());
@@ -159,8 +157,24 @@ public class SlidingWindow<T> {
             return;
         }
 
+        // 高并发下情况下出现刚刚获取的最后一个窗口被删除的情况
+        int count = 10;
         ConcurrentLinkedQueue<T> list = saveData.get(windowPeriod);
-        list.add(data);
+        while (Objects.isNull(list) && count > 0) {
+            count--;
+            windowPeriod = getNewWindowPeriod();
+            if (Objects.isNull(windowPeriod)) {
+                continue;
+            }
+            list = saveData.get(windowPeriod);
+        }
+
+        if (Objects.nonNull(list)) {
+            list.add(data);
+        } else {
+            // 这里一般走不到，作为兜底
+            SnailJobLog.LOCAL.error("Data loss. [{}]", JsonUtil.toJsonString(data));
+        }
 
         if (list.size() >= totalThreshold) {
             doHandlerListener(windowPeriod);
@@ -176,7 +190,8 @@ public class SlidingWindow<T> {
     private void doHandlerListener(LocalDateTime windowPeriod) {
 
         NOTICE_LOCK.lock();
-
+        // 深拷贝
+        ConcurrentLinkedQueue<T> deepCopy = null;
         try {
 
             ConcurrentLinkedQueue<T> list = saveData.get(windowPeriod);
@@ -185,38 +200,28 @@ public class SlidingWindow<T> {
             }
 
             // 深拷贝
-            ConcurrentLinkedQueue<T> deepCopy = new ConcurrentLinkedQueue<>(list);
+            deepCopy = new ConcurrentLinkedQueue<>(list);
             clear(windowPeriod, deepCopy);
 
             if (CollUtil.isEmpty(deepCopy)) {
                 return;
             }
 
-            for (Listener<T> listener : listeners) {
-                listener.handler(new ArrayList<>(deepCopy));
-            }
-
         } catch (Exception e) {
-            SnailJobLog.LOCAL.error("到达总量窗口期通知异常", e);
+            SnailJobLog.LOCAL.error("deep copy task queue is error", e);
         } finally {
             NOTICE_LOCK.unlock();
         }
 
-    }
-
-    /**
-     * 删除2倍窗口期之前无效窗口
-     *
-     * @param windowPeriod 当前最老窗口期
-     */
-    private void removeInvalidWindow(LocalDateTime windowPeriod) {
-
-        LocalDateTime currentTime = LocalDateTime.now().minus(duration * 2, chronoUnit);
-        if (windowPeriod.isBefore(currentTime)) {
-            SnailJobLog.LOCAL.debug("删除过期窗口 windowPeriod:[{}] currentTime:[{}]", windowPeriod, currentTime);
-            saveData.remove(windowPeriod);
+        if (!CollectionUtils.isEmpty(deepCopy)) {
+            try {
+                for (Listener<T> listener : listeners) {
+                    listener.handler(new ArrayList<>(deepCopy));
+                }
+            } catch (Exception e) {
+                SnailJobLog.LOCAL.error("notice is error", e);
+            }
         }
-
     }
 
     /**
@@ -228,7 +233,7 @@ public class SlidingWindow<T> {
         try {
             return saveData.firstKey();
         } catch (NoSuchElementException e) {
-            SnailJobLog.LOCAL.error("第一个窗口异常. saveData:[{}]", JsonUtil.toJsonString(saveData));
+            SnailJobLog.LOCAL.error("First window exception. saveData:[{}]", JsonUtil.toJsonString(saveData));
             return null;
         }
 
@@ -243,8 +248,21 @@ public class SlidingWindow<T> {
         try {
             return saveData.lastKey();
         } catch (NoSuchElementException e) {
-            SnailJobLog.LOCAL.error("第后一个窗口异常. saveData:[{}]", JsonUtil.toJsonString(saveData));
+            SnailJobLog.LOCAL.error("The last window is abnormal. SaveData:[{}]", JsonUtil.toJsonString(saveData));
             return null;
+        }
+    }
+
+    /**
+     * 删除2倍窗口期之前无效窗口
+     *
+     * @param windowPeriod 当前最老窗口期
+     */
+    private void removeInvalidWindow(LocalDateTime windowPeriod) {
+
+        LocalDateTime currentTime = LocalDateTime.now().minus(duration * 2, chronoUnit);
+        if (windowPeriod.isBefore(currentTime) && CollUtil.isEmpty(saveData.get(windowPeriod))) {
+            saveData.remove(windowPeriod);
         }
     }
 
@@ -286,8 +304,11 @@ public class SlidingWindow<T> {
         // 删除过期窗口期数据
         removeInvalidWindow(windowPeriod);
 
+        // 超过窗口阈值预警
+        alarmWindowTotal();
+
         if (windowPeriod.isBefore(condition)) {
-            SnailJobLog.LOCAL.debug("到达时间窗口期 [{}] [{}]", windowPeriod, JsonUtil.toJsonString(saveData));
+            SnailJobLog.LOCAL.debug("Time window reached [{}] [{}]", windowPeriod, JsonUtil.toJsonString(saveData));
             doHandlerListener(windowPeriod);
         }
     }
@@ -308,9 +329,9 @@ public class SlidingWindow<T> {
 
         threadPoolExecutor.scheduleAtFixedRate(() -> {
             try {
-                extract(LocalDateTime.now().minus(duration, chronoUnit));
+                extract(LocalDateTime.now());
             } catch (Exception e) {
-                SnailJobLog.LOCAL.error("滑动窗口异常", e);
+                SnailJobLog.LOCAL.error("Sliding window exception", e);
             }
         }, 1, 1, TimeUnit.SECONDS);
     }
@@ -378,7 +399,7 @@ public class SlidingWindow<T> {
          * @return this
          */
         public Builder<T> withTotalThreshold(int totalThreshold) {
-            Assert.isTrue(totalThreshold > 0, "总量窗口期阈值不能小于0");
+            Assert.isTrue(totalThreshold > 0, "Total window period threshold cannot be less than 0");
             this.totalThreshold = totalThreshold;
             return this;
         }
@@ -390,7 +411,7 @@ public class SlidingWindow<T> {
          * @return this
          */
         public Builder<T> withWindowTotalThreshold(int windowTotalThreshold) {
-            Assert.isTrue(windowTotalThreshold > 0, "窗口数量阈值不能小于0");
+            Assert.isTrue(windowTotalThreshold > 0, "Window quantity threshold cannot be less than 0");
             this.windowTotalThreshold = windowTotalThreshold;
             return this;
         }
@@ -419,7 +440,7 @@ public class SlidingWindow<T> {
          * @return this
          */
         public Builder<T> withDuration(long duration, ChronoUnit chronoUnit) {
-            Assert.isTrue(duration > 0, "窗口期不能小于0");
+            Assert.isTrue(duration > 0, "Window period cannot be less than 0");
             this.duration = duration;
             this.chronoUnit = chronoUnit;
             return this;

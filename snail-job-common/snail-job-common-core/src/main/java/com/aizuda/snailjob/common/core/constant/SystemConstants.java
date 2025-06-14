@@ -151,6 +151,10 @@ public interface SystemConstants {
 
         String OPENAPI_GET_JOB_DETAIL = "/api/job/getJobDetail";
 
+        String OPENAPI_GET_JOB_BATCH_DETAIL = "/api/job/getJobBatchDetail";
+
+        String OPENAPI_GET_WORKFLOW_BATCH_DETAIL = "/api/job/getWorkflowBatchDetail";
+
         String OPENAPI_TRIGGER_JOB = "/api/job/triggerJob";
 
         String OPENAPI_TRIGGER_WORKFLOW = "/api/job/triggerWorkFlow";
@@ -162,6 +166,12 @@ public interface SystemConstants {
         String OPENAPI_DELETE_JOB = "/api/job/deleteJob";
 
         String OPENAPI_DELETE_WORKFLOW = "/api/job/deleteWorkFlow";
+
+        String OPENAPI_ADD_RETRY = "/api/retry/query";
+
+        String OPENAPI_UPDATE_RETRY_STATUS = "/api/retry/updateRetryStatus";
+
+        String OPENAPI_TRIGGER_RETRY = "/api/retry/triggerRetry";
 
     }
 

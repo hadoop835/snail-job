@@ -1,7 +1,6 @@
 package com.aizuda.snailjob.server.web.service;
 
-import com.aizuda.snailjob.server.web.model.request.JobLogQueryVO;
-import com.aizuda.snailjob.server.web.model.response.JobLogResponseVO;
+import com.aizuda.snailjob.server.common.vo.JobLogQueryVO;
 
 /**
  * @author: opensnail
@@ -10,5 +9,6 @@ import com.aizuda.snailjob.server.web.model.response.JobLogResponseVO;
  */
 public interface JobLogService {
 
-    JobLogResponseVO getJobLogPage(JobLogQueryVO jobQueryVO);
+    void getJobLogPage(JobLogQueryVO jobQueryVO);
+
 }

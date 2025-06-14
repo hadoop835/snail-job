@@ -86,7 +86,7 @@ public class CleanerSchedule extends AbstractSchedule implements Lifecycle {
     protected void doExecute() {
         try {
             // 清除日志默认保存天数大于零、最少保留最近一天的日志数据
-            if (systemProperties.getLogStorage() <= 1) {
+            if (systemProperties.getLogStorage() < 1) {
                 SnailJobLog.LOCAL.error("retry clear log storage error", systemProperties.getLogStorage());
                 return;
             }
@@ -112,7 +112,7 @@ public class CleanerSchedule extends AbstractSchedule implements Lifecycle {
     private List<RetryPartitionTask> retryTaskBatchList(Long startId, LocalDateTime endTime) {
 
         List<Retry> retryTaskList = retryMapper.selectPage(
-                        new Page<>(0, 500),
+                        new Page<>(0, 500, Boolean.FALSE),
                         new LambdaUpdateWrapper<Retry>()
                                 .ge(Retry::getId, startId)
                                 .le(Retry::getCreateDt, endTime)
@@ -212,12 +212,12 @@ public class CleanerSchedule extends AbstractSchedule implements Lifecycle {
 
         Assert.isTrue(retryDeadLetters.size() == accessTemplate
                         .getRetryDeadLetterAccess().insertBatch(retryDeadLetters),
-                () -> new SnailJobServerException("插入死信队列失败 [{}]", JsonUtil.toJsonString(retryDeadLetters)));
+                () -> new SnailJobServerException("Failed to insert into dead letter queue [{}]", JsonUtil.toJsonString(retryDeadLetters)));
 
         TaskAccess<Retry> retryTaskAccess = accessTemplate.getRetryAccess();
         Assert.isTrue(retries.size() == retryTaskAccess.delete(new LambdaQueryWrapper<Retry>()
                         .in(Retry::getId, StreamUtils.toList(retries, RetryPartitionTask::getId))),
-                () -> new SnailJobServerException("删除重试数据失败 [{}]", JsonUtil.toJsonString(retries)));
+                () -> new SnailJobServerException("Failed to delete retry data [{}]", JsonUtil.toJsonString(retries)));
 
         SnailSpringContext.getContext().publishEvent(new RetryTaskFailDeadLetterAlarmEvent(
                 RetryTaskConverter.INSTANCE.toRetryTaskFailDeadLetterAlarmEventDTO(retryDeadLetters)

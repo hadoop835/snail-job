@@ -44,7 +44,7 @@ public class RemoteRetryExecutor {
         executeRespDto.setSceneName(context.getScene());
 
         try {
-            RetrySiteSnapshot.setAttemptNumber(context.getRetryCount());
+//            RetrySiteSnapshot.setAttemptNumber(context.getRetryCount() + 1);
 
             // 初始化实时日志上下文
             initLogContext(context);
@@ -54,12 +54,12 @@ public class RemoteRetryExecutor {
 
             if (RetrySiteSnapshot.isRetryForStatusCode()) {
                 executeRespDto.setStatusCode(RetryResultStatusEnum.STOP.getStatus());
-                executeRespDto.setExceptionMsg("下游标记不需要重试");
+                executeRespDto.setExceptionMsg("Downstream marks no need for retry");
             } else {
                 RetryResultStatusEnum retryResultStatusEnum = retryerResultContext.getRetryResultStatusEnum();
                 if (Objects.isNull(retryResultStatusEnum)) {
                     retryResultStatusEnum = RetryResultStatusEnum.STOP;
-                    retryerResultContext.setMessage("未获取重试状态. 任务停止");
+                    retryerResultContext.setMessage("No retry status obtained. Task stopped");
                 }
 
                 executeRespDto.setStatusCode(retryResultStatusEnum.getStatus());
@@ -70,18 +70,20 @@ public class RemoteRetryExecutor {
                 executeRespDto.setResultJson(JsonUtil.toJsonString(retryerResultContext.getResult()));
             }
 
+            Integer retryCount = context.getRetryCount() + 1;
             if (Objects.equals(RetryResultStatusEnum.SUCCESS.getStatus(), executeRespDto.getStatusCode())) {
-                SnailJobLog.REMOTE.info("remote retry【SUCCESS】. count:[{}] result:[{}]", context.getRetryCount(),
-                        executeRespDto.getResultJson());
+                SnailJobLog.REMOTE.info("remote retry【SUCCESS】. retryTaskId:[{}] count:[{}] result:[{}]",
+                        context.getRetryTaskId(), retryCount, executeRespDto.getResultJson());
             } else if (Objects.equals(RetryResultStatusEnum.STOP.getStatus(), executeRespDto.getStatusCode())) {
-                SnailJobLog.REMOTE.warn("remote retry 【STOP】. count:[{}] exceptionMsg:[{}]",
-                        context.getRetryCount(), executeRespDto.getExceptionMsg());
+                SnailJobLog.REMOTE.warn("remote retry 【STOP】.retryTaskId:[{}] count:[{}]  exceptionMsg:[{}]",
+                        context.getRetryTaskId(), retryCount, executeRespDto.getExceptionMsg());
             } else if (Objects.equals(RetryResultStatusEnum.FAILURE.getStatus(), executeRespDto.getStatusCode())) {
-                SnailJobLog.REMOTE.error("remote retry 【FAILURE】. count:[{}] ", context.getRetryCount(),
-                        retryerResultContext.getThrowable());
+                SnailJobLog.REMOTE.error("remote retry 【FAILURE】. retryTaskId:[{}] count:[{}] ",
+                        context.getRetryTaskId(), retryCount, retryerResultContext.getThrowable());
             } else {
-                SnailJobLog.REMOTE.error("remote retry 【UNKNOWN】. count:[{}] result:[{}]", context.getRetryCount(),
-                        executeRespDto.getResultJson(), retryerResultContext.getThrowable());
+                SnailJobLog.REMOTE.error("remote retry 【UNKNOWN】. retryTaskId:[{}] count:[{}] result:[{}]",
+                        context.getRetryTaskId(), retryCount, executeRespDto.getResultJson(),
+                        retryerResultContext.getThrowable());
             }
 
         } finally {

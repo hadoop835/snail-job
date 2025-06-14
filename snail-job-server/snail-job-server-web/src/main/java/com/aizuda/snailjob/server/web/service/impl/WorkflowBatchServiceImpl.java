@@ -16,14 +16,14 @@ import com.aizuda.snailjob.server.job.task.support.handler.WorkflowBatchHandler;
 import com.aizuda.snailjob.server.web.model.base.PageResult;
 import com.aizuda.snailjob.server.web.model.request.UserSessionVO;
 import com.aizuda.snailjob.server.web.model.request.WorkflowBatchQueryVO;
-import com.aizuda.snailjob.server.web.model.response.JobBatchResponseVO;
-import com.aizuda.snailjob.server.web.model.response.WorkflowBatchResponseVO;
-import com.aizuda.snailjob.server.web.model.response.WorkflowDetailResponseVO;
+import com.aizuda.snailjob.server.common.vo.JobBatchResponseVO;
+import com.aizuda.snailjob.server.common.vo.WorkflowBatchResponseVO;
+import com.aizuda.snailjob.server.common.vo.WorkflowDetailResponseVO;
 import com.aizuda.snailjob.server.web.service.WorkflowBatchService;
-import com.aizuda.snailjob.server.web.service.convert.JobBatchResponseVOConverter;
-import com.aizuda.snailjob.server.web.service.convert.WorkflowConverter;
+import com.aizuda.snailjob.server.common.convert.JobBatchResponseVOConverter;
+import com.aizuda.snailjob.server.common.convert.WorkflowConverter;
 import com.aizuda.snailjob.server.web.service.handler.JobHandler;
-import com.aizuda.snailjob.server.web.service.handler.WorkflowHandler;
+import com.aizuda.snailjob.server.common.handler.WorkflowHandler;
 import com.aizuda.snailjob.server.web.util.UserSessionUtils;
 import com.aizuda.snailjob.template.datasource.persistence.dataobject.WorkflowBatchResponseDO;
 import com.aizuda.snailjob.template.datasource.persistence.mapper.*;
@@ -85,7 +85,6 @@ public class WorkflowBatchServiceImpl implements WorkflowBatchService {
                 .eq(queryVO.getWorkflowId() != null, "batch.workflow_id", queryVO.getWorkflowId())
                 .in(CollUtil.isNotEmpty(groupNames), "batch.group_name", groupNames)
                 .eq(queryVO.getTaskBatchStatus() != null, "batch.task_batch_status", queryVO.getTaskBatchStatus())
-                .likeRight(StrUtil.isNotBlank(queryVO.getWorkflowName()), "flow.workflow_name", queryVO.getWorkflowName())
                 .between(ObjUtil.isNotNull(queryVO.getDatetimeRange()),
                         "batch.create_dt", queryVO.getStartDt(), queryVO.getEndDt())
                 .eq("batch.deleted", 0)
@@ -212,8 +211,8 @@ public class WorkflowBatchServiceImpl implements WorkflowBatchService {
                     new HashMap<>(), workflowNodeMap);
             responseVO.setNodeConfig(config);
         } catch (Exception e) {
-            log.error("反序列化失败. json:[{}]", flowInfo, e);
-            throw new SnailJobServerException("查询工作流批次详情失败");
+            log.error("Deserialization failed. json:[{}]", flowInfo, e);
+            throw new SnailJobServerException("Failed to query workflow batch details");
         }
 
         return responseVO;
@@ -238,7 +237,7 @@ public class WorkflowBatchServiceImpl implements WorkflowBatchService {
         Assert.isTrue(ids.size() == workflowTaskBatchMapper.delete(new LambdaQueryWrapper<WorkflowTaskBatch>()
                         .eq(WorkflowTaskBatch::getNamespaceId, namespaceId)
                         .in(WorkflowTaskBatch::getId, ids)),
-                () -> new SnailJobServerException("删除工作流任务失败, 请检查任务状态是否关闭状态"));
+                () -> new SnailJobServerException("Failed to delete workflow task, please check if the task status is closed"));
 
         List<JobTaskBatch> jobTaskBatches = jobTaskBatchMapper.selectList(new LambdaQueryWrapper<JobTaskBatch>()
                 .eq(JobTaskBatch::getNamespaceId, namespaceId)

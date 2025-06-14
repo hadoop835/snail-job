@@ -21,7 +21,7 @@ import static com.aizuda.snailjob.client.job.core.enums.TriggerTypeEnum.*;
  * @date 2024-10-19 22:34:38
  * @since sj_1.2.0
  */
-public abstract class AbstractParamsHandler<H, R> extends AbstractRequestHandler<R> {
+public abstract class AbstractParamsHandler<H, R> extends AbstractJobRequestHandler<R> {
     protected static final String SHARD_NUM = "shardNum";
     @Getter
     private final RequestAddOrUpdateJobDTO reqDTO;
@@ -163,7 +163,7 @@ public abstract class AbstractParamsHandler<H, R> extends AbstractRequestHandler
      */
     public H setTriggerInterval(Integer triggerInterval) {
         Assert.isTrue(reqDTO.getTriggerType() == SCHEDULED_TIME.getType(),
-                () -> new SnailJobClientException("此方法只限制固定时间使用"));
+                () -> new SnailJobClientException("This method is only limited to fixed time usage"));
         setTriggerInterval(String.valueOf(triggerInterval));
         return r;
     }
@@ -179,7 +179,7 @@ public abstract class AbstractParamsHandler<H, R> extends AbstractRequestHandler
     public H setTriggerInterval(String triggerInterval) {
         // 若是工作流则没有调度时间
         Assert.isFalse(reqDTO.getTriggerType() == WORK_FLOW.getType(),
-                () -> new SnailJobClientException("工作流无需配置"));
+                () -> new SnailJobClientException("No need to configure workflow"));
         reqDTO.setTriggerInterval(triggerInterval);
         return r;
     }

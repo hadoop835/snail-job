@@ -1,6 +1,6 @@
 package com.aizuda.snailjob.client.core.report;
 
-import com.aizuda.snailjob.client.common.NettyClient;
+import com.aizuda.snailjob.client.common.RpcClient;
 import com.aizuda.snailjob.client.common.cache.GroupVersionCache;
 import com.aizuda.snailjob.client.common.config.SnailJobProperties;
 import com.aizuda.snailjob.client.common.rpc.client.RequestBuilder;
@@ -73,8 +73,8 @@ public class SyncReport extends AbstractReport {
 
         RetryTaskDTO retryTaskDTO = buildRetryTaskDTO(scene, targetClassName, args);
 
-        NettyClient client = RequestBuilder.<NettyClient, SnailJobRpcResult>newBuilder()
-                .client(NettyClient.class)
+        RpcClient client = RequestBuilder.<RpcClient, SnailJobRpcResult>newBuilder()
+                .client(RpcClient.class)
                 .async(Boolean.FALSE)
                 .timeout(timeout)
                 .unit(unit)
@@ -109,14 +109,14 @@ public class SyncReport extends AbstractReport {
                                 snailJobProperties.getGroup(),
                                 LocalDateTime.now().format(formatter),
                                 e.getMessage())
-                        .title("同步上报异常:[{}]", snailJobProperties.getGroup())
+                        .title("Sync reporting exception: [{}]", snailJobProperties.getGroup())
                         .notifyAttribute(recipient.getNotifyAttribute());
 
                 Optional.ofNullable(SnailJobAlarmFactory.getAlarmType(recipient.getNotifyType())).ifPresent(alarm -> alarm.asyncSendMessage(context));
             }
 
         } catch (Exception e1) {
-            SnailJobLog.LOCAL.error("客户端发送组件异常告警失败", e1);
+            SnailJobLog.LOCAL.error("Client failed to send component exception alarm", e1);
         }
 
     }

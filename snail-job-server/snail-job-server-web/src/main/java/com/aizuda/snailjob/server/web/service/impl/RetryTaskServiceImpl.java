@@ -4,25 +4,36 @@ import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.lang.Assert;
 import cn.hutool.core.util.ObjUtil;
 import cn.hutool.core.util.StrUtil;
+import com.aizuda.snailjob.common.core.context.SnailSpringContext;
 import com.aizuda.snailjob.common.core.enums.RetryOperationReasonEnum;
 import com.aizuda.snailjob.common.core.enums.RetryTaskStatusEnum;
 import com.aizuda.snailjob.common.core.util.JsonUtil;
 import com.aizuda.snailjob.common.log.constant.LogFieldConstants;
+import com.aizuda.snailjob.server.common.dto.PartitionTask;
 import com.aizuda.snailjob.server.common.exception.SnailJobServerException;
+import com.aizuda.snailjob.server.common.util.PartitionTaskUtils;
 import com.aizuda.snailjob.server.retry.task.dto.TaskStopJobDTO;
 import com.aizuda.snailjob.server.retry.task.support.handler.RetryTaskStopHandler;
 import com.aizuda.snailjob.server.web.model.base.PageResult;
+import com.aizuda.snailjob.server.web.model.dto.LogMessagePartitionTask;
+import com.aizuda.snailjob.server.web.model.event.WsSendEvent;
 import com.aizuda.snailjob.server.web.model.request.RetryTaskLogMessageQueryVO;
 import com.aizuda.snailjob.server.web.model.request.RetryTaskQueryVO;
 import com.aizuda.snailjob.server.web.model.request.UserSessionVO;
-import com.aizuda.snailjob.server.web.model.response.RetryResponseVO;
 import com.aizuda.snailjob.server.web.model.response.RetryTaskLogMessageResponseVO;
 import com.aizuda.snailjob.server.web.model.response.RetryTaskResponseVO;
 import com.aizuda.snailjob.server.web.service.RetryTaskService;
-import com.aizuda.snailjob.server.web.service.convert.RetryConverter;
+import com.aizuda.snailjob.server.retry.task.convert.RetryConverter;
+import com.aizuda.snailjob.server.web.service.convert.LogMessagePartitionTaskConverter;
 import com.aizuda.snailjob.server.web.service.convert.RetryTaskLogResponseVOConverter;
 import com.aizuda.snailjob.server.web.service.convert.RetryTaskResponseVOConverter;
+import com.aizuda.snailjob.server.web.timer.LogTimerWheel;
+import com.aizuda.snailjob.server.web.timer.RetryTaskLogTimerTask;
 import com.aizuda.snailjob.server.web.util.UserSessionUtils;
+import com.aizuda.snailjob.template.datasource.access.AccessTemplate;
+import com.aizuda.snailjob.template.datasource.persistence.dataobject.common.PageResponseDO;
+import com.aizuda.snailjob.template.datasource.persistence.dataobject.log.RetryTaskLogMessageDO;
+import com.aizuda.snailjob.template.datasource.persistence.dataobject.log.RetryTaskLogMessageQueryDO;
 import com.aizuda.snailjob.template.datasource.persistence.mapper.RetryMapper;
 import com.aizuda.snailjob.template.datasource.persistence.mapper.RetryTaskMapper;
 import com.aizuda.snailjob.template.datasource.persistence.mapper.RetryTaskLogMessageMapper;
@@ -31,12 +42,16 @@ import com.aizuda.snailjob.template.datasource.persistence.po.RetryTask;
 import com.aizuda.snailjob.template.datasource.persistence.po.RetryTaskLogMessage;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.PageDTO;
+import com.google.common.base.Predicate;
 import com.google.common.collect.Lists;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.*;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 /**
@@ -46,11 +61,12 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class RetryTaskServiceImpl implements RetryTaskService {
-
+    private static final Long DELAY_MILLS = 5000L;
     private final RetryTaskMapper retryTaskMapper;
     private final RetryMapper retryMapper;
     private final RetryTaskLogMessageMapper retryTaskLogMessageMapper;
     private final RetryTaskStopHandler retryTaskStopHandler;
+    private final AccessTemplate accessTemplate;
 
     @Override
     public PageResult<List<RetryTaskResponseVO>> getRetryTaskLogPage(RetryTaskQueryVO queryVO) {
@@ -70,7 +86,7 @@ public class RetryTaskServiceImpl implements RetryTaskService {
                 .between(ObjUtil.isNotNull(queryVO.getDatetimeRange()),
                         RetryTask::getCreateDt, queryVO.getStartDt(), queryVO.getEndDt())
                 .select(RetryTask::getGroupName, RetryTask::getId, RetryTask::getSceneName, RetryTask::getTaskStatus,
-                        RetryTask::getCreateDt, RetryTask::getTaskType, RetryTask::getOperationReason, RetryTask::getRetryId)
+                        RetryTask::getCreateDt, RetryTask::getUpdateDt, RetryTask::getTaskType, RetryTask::getOperationReason, RetryTask::getRetryId)
                 .orderByDesc(RetryTask::getCreateDt);
 
         PageDTO<RetryTask> retryTaskPageDTO = retryTaskMapper.selectPage(pageDTO, wrapper);
@@ -80,88 +96,79 @@ public class RetryTaskServiceImpl implements RetryTaskService {
     }
 
     @Override
-    public RetryTaskLogMessageResponseVO getRetryTaskLogMessagePage(
-            RetryTaskLogMessageQueryVO queryVO) {
-        if (queryVO.getRetryTaskId() == null || StrUtil.isBlank(queryVO.getGroupName())) {
-            RetryTaskLogMessageResponseVO jobLogResponseVO = new RetryTaskLogMessageResponseVO();
-            jobLogResponseVO.setNextStartId(0L);
-            jobLogResponseVO.setFromIndex(0);
-            return jobLogResponseVO;
+    public void getRetryTaskLogMessagePage(RetryTaskLogMessageQueryVO queryVO) {
+        String sid = queryVO.getSid();
+        RetryTaskLogMessageQueryDO pageQueryDO = new RetryTaskLogMessageQueryDO();
+        pageQueryDO.setPage(1);
+        pageQueryDO.setSize(50);
+        pageQueryDO.setRetryTaskId(queryVO.getRetryTaskId());
+        pageQueryDO.setStartRealTime(queryVO.getStartRealTime());
+        pageQueryDO.setSearchCount(true);
+        // 拉取数据
+        PageResponseDO<RetryTaskLogMessageDO> pageResponseDO = accessTemplate.getRetryTaskLogMessageAccess()
+                .listPage(pageQueryDO);
+
+        long total = pageResponseDO.getTotal();
+
+        int totalPage = (int) ((total + queryVO.getSize() - 1) / queryVO.getSize());
+
+        Long lastRealTime = 0L;
+
+        if (0 == totalPage &&
+                (null != pageQueryDO.getStartRealTime() && 0 != pageQueryDO.getStartRealTime())){
+            lastRealTime = pageQueryDO.getStartRealTime();
         }
 
-        String namespaceId = UserSessionUtils.currentUserSession().getNamespaceId();
-
-        PageDTO<RetryTaskLogMessage> pageDTO = new PageDTO<>(queryVO.getPage(), queryVO.getSize());
-        PageDTO<RetryTaskLogMessage> selectPage = retryTaskLogMessageMapper.selectPage(pageDTO,
-                new LambdaQueryWrapper<RetryTaskLogMessage>()
-                        .select(RetryTaskLogMessage::getId, RetryTaskLogMessage::getLogNum)
-                        .ge(RetryTaskLogMessage::getId, queryVO.getStartId())
-                        .eq(RetryTaskLogMessage::getNamespaceId, namespaceId)
-                        .eq(RetryTaskLogMessage::getRetryTaskId, queryVO.getRetryTaskId())
-                        .eq(RetryTaskLogMessage::getGroupName, queryVO.getGroupName())
-                        .orderByAsc(RetryTaskLogMessage::getId).orderByAsc(RetryTaskLogMessage::getRealTime)
-                        .orderByDesc(RetryTaskLogMessage::getCreateDt));
-
-        List<RetryTaskLogMessage> records = selectPage.getRecords();
-
-        if (CollUtil.isEmpty(records)) {
-            return new RetryTaskLogMessageResponseVO()
-                    .setFinished(Boolean.TRUE)
-                    .setNextStartId(queryVO.getStartId())
-                    .setFromIndex(0);
-        }
-
-        Integer fromIndex = Optional.ofNullable(queryVO.getFromIndex()).orElse(0);
-        RetryTaskLogMessage firstRecord = records.get(0);
-        List<Long> ids = Lists.newArrayList(firstRecord.getId());
-        int total = firstRecord.getLogNum() - fromIndex;
-        for (int i = 1; i < records.size(); i++) {
-            RetryTaskLogMessage record = records.get(i);
-            if (total + record.getLogNum() > queryVO.getSize()) {
-                break;
+        for (int i = 1; i <= totalPage;) {
+            for (RetryTaskLogMessageDO retryTaskLogMessageDO : pageResponseDO.getRows()) {
+                // 发生日志内容到前端
+                String message = retryTaskLogMessageDO.getMessage();
+                List<Map<String, String>> logContents = JsonUtil.parseObject(message, List.class);
+                logContents = logContents.stream()
+                        .sorted(Comparator.comparingLong(o -> Long.parseLong(o.get(LogFieldConstants.TIME_STAMP))))
+                        .toList();
+                for (Map<String, String> logContent : logContents) {
+                    // send发消息
+                    WsSendEvent sendEvent = new WsSendEvent(this);
+                    sendEvent.setSid(sid);
+                    sendEvent.setMessage(JsonUtil.toJsonString(logContent));
+                    SnailSpringContext.getContext().publishEvent(sendEvent);
+                }
             }
 
-            total += record.getLogNum();
-            ids.add(record.getId());
+            // 继续查询下一页
+            pageQueryDO.setSearchCount(false);
+            pageQueryDO.setPage(++i);
+            pageResponseDO = accessTemplate.getRetryTaskLogMessageAccess()
+                    .listPage(pageQueryDO);
         }
 
-        long nextStartId = 0;
-        List<Map<String, String>> messages = Lists.newArrayList();
-        List<RetryTaskLogMessage> jobLogMessages = retryTaskLogMessageMapper.selectList(
-                new LambdaQueryWrapper<RetryTaskLogMessage>()
-                        .in(RetryTaskLogMessage::getId, ids)
-                        .orderByAsc(RetryTaskLogMessage::getId)
-                        .orderByAsc(RetryTaskLogMessage::getRealTime)
-        );
+        RetryTask retryTask = retryTaskMapper.selectOne(
+                new LambdaQueryWrapper<RetryTask>().eq(RetryTask::getId, queryVO.getRetryTaskId()));
 
-        for (final RetryTaskLogMessage retryTaskLogMessage : jobLogMessages) {
-
-            List<Map<String, String>> originalList = JsonUtil.parseObject(retryTaskLogMessage.getMessage(), List.class);
-            int size = originalList.size() - fromIndex;
-            List<Map<String, String>> pageList = originalList.stream().skip(fromIndex).limit(queryVO.getSize())
-                    .collect(Collectors.toList());
-            if (messages.size() + size >= queryVO.getSize()) {
-                messages.addAll(pageList);
-                nextStartId = retryTaskLogMessage.getId();
-                fromIndex = Math.min(fromIndex + queryVO.getSize(), originalList.size() - 1) + 1;
-                break;
-            }
-
-            messages.addAll(pageList);
-            nextStartId = retryTaskLogMessage.getId() + 1;
-            fromIndex = 0;
+        if (Objects.isNull(retryTask)
+                || (RetryTaskStatusEnum.TERMINAL_STATUS_SET.contains(retryTask.getTaskStatus()) &&
+                retryTask.getUpdateDt().plusSeconds(15).isBefore(LocalDateTime.now()))) {
+            // 发生完成标识
+            WsSendEvent sendEvent = new WsSendEvent(this);
+            sendEvent.setMessage("END");
+            sendEvent.setSid(sid);
+            SnailSpringContext.getContext().publishEvent(sendEvent);
+        } else {
+            // 覆盖作为下次查询的起始条件
+            queryVO.setStartRealTime(lastRealTime);
+            scheduleNextAttempt(queryVO, sid);
         }
+    }
 
-        messages = messages.stream()
-                .sorted(Comparator.comparingLong(o -> Long.parseLong(o.get(LogFieldConstants.TIME_STAMP))))
-                .collect(Collectors.toList());
-
-        RetryTaskLogMessageResponseVO responseVO = new RetryTaskLogMessageResponseVO();
-        responseVO.setMessage(messages);
-        responseVO.setNextStartId(nextStartId);
-        responseVO.setFromIndex(fromIndex);
-
-        return responseVO;
+    /**
+     * 使用时间轮5秒再进行日志查询
+     *
+     * @param queryVO
+     * @param sid
+     */
+    private void scheduleNextAttempt(RetryTaskLogMessageQueryVO queryVO, String sid) {
+        LogTimerWheel.registerWithJobTaskLog(() -> new RetryTaskLogTimerTask(queryVO, sid), Duration.ofMillis(DELAY_MILLS));
     }
 
     @Override
@@ -188,7 +195,7 @@ public class RetryTaskServiceImpl implements RetryTaskService {
                         .in(RetryTask::getTaskStatus, RetryTaskStatusEnum.TERMINAL_STATUS_SET)
                         .eq(RetryTask::getNamespaceId, namespaceId)
                         .eq(RetryTask::getId, id));
-        Assert.notNull(retryTask, () -> new SnailJobServerException("数据删除失败"));
+        Assert.notNull(retryTask, () -> new SnailJobServerException("Data deletion failed"));
 
         retryTaskLogMessageMapper.delete(new LambdaQueryWrapper<RetryTaskLogMessage>()
                 .eq(RetryTaskLogMessage::getNamespaceId, namespaceId)
@@ -209,8 +216,8 @@ public class RetryTaskServiceImpl implements RetryTaskService {
                         .in(RetryTask::getTaskStatus, RetryTaskStatusEnum.TERMINAL_STATUS_SET)
                         .eq(RetryTask::getNamespaceId, namespaceId)
                         .in(RetryTask::getId, ids));
-        Assert.notEmpty(retryTasks, () -> new SnailJobServerException("数据不存在"));
-        Assert.isTrue(retryTasks.size() == ids.size(), () -> new SnailJobServerException("数据不存在"));
+        Assert.notEmpty(retryTasks, () -> new SnailJobServerException("Data does not exist"));
+        Assert.isTrue(retryTasks.size() == ids.size(), () -> new SnailJobServerException("Data does not exist"));
 
         for (final RetryTask retryTask : retryTasks) {
             retryTaskLogMessageMapper.delete(
@@ -226,15 +233,15 @@ public class RetryTaskServiceImpl implements RetryTaskService {
     public Boolean stopById(Long id) {
 
         RetryTask retryTask = retryTaskMapper.selectById(id);
-        Assert.notNull(retryTask, () -> new SnailJobServerException("没有可执行的任务"));
+        Assert.notNull(retryTask, () -> new SnailJobServerException("No executable tasks"));
 
         Retry retry = retryMapper.selectById(retryTask.getRetryId());
-        Assert.notNull(retry, () -> new SnailJobServerException("任务不存在"));
+        Assert.notNull(retry, () -> new SnailJobServerException("Task does not exist"));
 
         TaskStopJobDTO taskStopJobDTO = RetryConverter.INSTANCE.toTaskStopJobDTO(retry);
         taskStopJobDTO.setOperationReason(RetryOperationReasonEnum.MANNER_STOP.getReason());
         taskStopJobDTO.setNeedUpdateTaskStatus(true);
-        taskStopJobDTO.setMessage("用户手动触发停止");
+        taskStopJobDTO.setMessage("User manually triggered stop");
         retryTaskStopHandler.stop(taskStopJobDTO);
 
         return true;

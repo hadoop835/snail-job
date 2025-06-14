@@ -40,7 +40,6 @@ import com.aizuda.snailjob.template.datasource.persistence.po.JobSummary;
 import com.aizuda.snailjob.template.datasource.persistence.po.SystemUser;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.PageDTO;
-import com.google.common.collect.Lists;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
@@ -51,7 +50,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.validation.annotation.Validated;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * @author opensnail
@@ -95,7 +93,7 @@ public class JobServiceImpl implements JobService {
                 new LambdaQueryWrapper<Job>()
                         .eq(Job::getNamespaceId, userSessionVO.getNamespaceId())
                         .in(CollUtil.isNotEmpty(groupNames), Job::getGroupName, groupNames)
-                        .likeRight(StrUtil.isNotBlank(queryVO.getJobName()), Job::getJobName, StrUtil.trim(queryVO.getJobName()))
+                        .like(StrUtil.isNotBlank(queryVO.getJobName()), Job::getJobName, StrUtil.trim(queryVO.getJobName()))
                         .like(StrUtil.isNotBlank(queryVO.getExecutorInfo()), Job::getExecutorInfo, StrUtil.trim(queryVO.getExecutorInfo()))
                         .eq(Objects.nonNull(queryVO.getJobStatus()), Job::getJobStatus, queryVO.getJobStatus())
                         .eq(Job::getDeleted, StatusEnum.NO.getStatus())
@@ -133,7 +131,7 @@ public class JobServiceImpl implements JobService {
                 new LambdaQueryWrapper<Job>()
                         .select(Job::getId, Job::getJobName)
                         .eq(Job::getNamespaceId, userSessionVO.getNamespaceId())
-                        .likeRight(StrUtil.isNotBlank(keywords), Job::getJobName, StrUtil.trim(keywords))
+                        .like(StrUtil.isNotBlank(keywords), Job::getJobName, StrUtil.trim(keywords))
                         .eq(StrUtil.isNotBlank(groupName), Job::getGroupName, groupName)
                         .eq(Objects.nonNull(jobId), Job::getId, jobId)
                         .eq(Job::getDeleted, StatusEnum.NO.getStatus())
@@ -157,10 +155,10 @@ public class JobServiceImpl implements JobService {
 
     @Override
     public boolean updateJob(JobRequestVO jobRequestVO) {
-        Assert.notNull(jobRequestVO.getId(), () -> new SnailJobServerException("id 不能为空"));
+        Assert.notNull(jobRequestVO.getId(), () -> new SnailJobServerException("id cannot be null"));
 
         Job job = jobMapper.selectById(jobRequestVO.getId());
-        Assert.notNull(job, () -> new SnailJobServerException("更新失败"));
+        Assert.notNull(job, () -> new SnailJobServerException("Update failed"));
 
         // 判断常驻任务
         Job updateJob = JobConverter.INSTANCE.convert(jobRequestVO);
@@ -206,7 +204,7 @@ public class JobServiceImpl implements JobService {
                 return StatusEnum.YES.getStatus();
             }
         } else {
-            throw new SnailJobServerException("未知触发类型");
+            throw new SnailJobServerException("Unknown trigger type");
         }
 
         return StatusEnum.NO.getStatus();
@@ -214,12 +212,14 @@ public class JobServiceImpl implements JobService {
 
     @Override
     public Boolean updateJobStatus(JobStatusUpdateRequestVO jobRequestVO) {
-        Assert.notNull(jobRequestVO.getId(), () -> new SnailJobServerException("id 不能为空"));
-        Assert.isTrue(1 == jobMapper.selectCount(new LambdaQueryWrapper<Job>().eq(Job::getId, jobRequestVO.getId())));
-
+        Assert.notNull(jobRequestVO.getId(), () -> new SnailJobServerException("id cannot be null"));
+        //解决IC76WG 状态停用启用后，因为是实体中设置了 @TableField(updateStrategy = FieldStrategy.ALWAYS , jdbcType= JdbcType.BIGINT ) 所以负责人字段要从新赋值。
+        Job oldJob = jobMapper.selectOne(new LambdaQueryWrapper<Job>().eq(Job::getId, jobRequestVO.getId()));
+        Assert.notNull(oldJob, () -> new SnailJobServerException("job task is find not"));
         Job job = new Job();
         job.setId(jobRequestVO.getId());
         job.setJobStatus(jobRequestVO.getJobStatus());
+        job.setOwnerId(oldJob.getOwnerId());
         return 1 == jobMapper.updateById(job);
     }
 
@@ -236,7 +236,7 @@ public class JobServiceImpl implements JobService {
         );
 
         Assert.isTrue(count > 0,
-                () -> new SnailJobServerException("组:[{}]已经关闭，不支持手动执行.", job.getGroupName()));
+                () -> new SnailJobServerException("Group [{}] is closed, manual execution is not supported.", job.getGroupName()));
         JobTaskPrepareDTO jobTaskPrepare = JobTaskConverter.INSTANCE.toJobTaskPrepare(job);
         // 设置now表示立即执行
         jobTaskPrepare.setNextTriggerAt(DateUtils.toNowMilli());
@@ -255,7 +255,7 @@ public class JobServiceImpl implements JobService {
         String namespaceId = UserSessionUtils.currentUserSession().getNamespaceId();
         List<Job> jobs = jobMapper.selectList(
                 new LambdaQueryWrapper<Job>()
-                        .select(Job::getId, Job::getJobName)
+                        .select(Job::getId, Job::getJobName, Job::getExecutorInfo, Job::getTaskType)
                         .eq(Job::getNamespaceId, namespaceId)
                         .eq(Job::getGroupName, groupName)
                         .eq(Job::getDeleted, StatusEnum.NO.getStatus())
@@ -280,7 +280,7 @@ public class JobServiceImpl implements JobService {
 
         List<JobRequestVO> requestList = new ArrayList<>();
         PartitionTaskUtils.process(startId -> {
-                    List<Job> jobList = jobMapper.selectPage(new PageDTO<>(0, 100),
+                    List<Job> jobList = jobMapper.selectPage(new PageDTO<>(0, 100, Boolean.FALSE),
                             new LambdaQueryWrapper<Job>()
                                     .eq(Job::getNamespaceId, namespaceId)
                                     .eq(StrUtil.isNotBlank(exportJobVO.getGroupName()), Job::getGroupName, exportJobVO.getGroupName())
@@ -312,7 +312,7 @@ public class JobServiceImpl implements JobService {
                         .eq(Job::getNamespaceId, namespaceId)
                         .eq(Job::getJobStatus, StatusEnum.NO.getStatus())
                         .in(Job::getId, ids)
-        ), () -> new SnailJobServerException("删除定时任务失败, 请检查任务状态是否关闭状态"));
+        ), () -> new SnailJobServerException("Failed to delete scheduled task, please check if the task status is closed"));
 
         List<JobSummary> jobSummaries = jobSummaryMapper.selectList(new LambdaQueryWrapper<JobSummary>()
                 .select(JobSummary::getId)

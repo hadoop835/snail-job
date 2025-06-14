@@ -29,6 +29,7 @@ import com.aizuda.snailjob.template.datasource.persistence.po.*;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.PageDTO;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -88,7 +89,7 @@ public class RetryDeadLetterServiceImpl implements RetryDeadLetterService {
         List<RetryDeadLetter> retryDeadLetterList = retryDeadLetterAccess.list(
                 new LambdaQueryWrapper<RetryDeadLetter>().in(RetryDeadLetter::getId, ids));
 
-        Assert.notEmpty(retryDeadLetterList, () -> new SnailJobServerException("数据不存在"));
+        Assert.notEmpty(retryDeadLetterList, () -> new SnailJobServerException("Data does not exist"));
 
         ConfigAccess<RetrySceneConfig> sceneConfigAccess = accessTemplate.getSceneConfigAccess();
         Set<String> sceneNameSet = StreamUtils.toSet(retryDeadLetterList, RetryDeadLetter::getSceneName);
@@ -105,7 +106,7 @@ public class RetryDeadLetterServiceImpl implements RetryDeadLetterService {
             RetrySceneConfig retrySceneConfig = sceneConfigMap.get(
                     retryDeadLetter.getGroupName() + retryDeadLetter.getSceneName());
             Assert.notNull(retrySceneConfig,
-                    () -> new SnailJobServerException("未查询到场景. [{}]", retryDeadLetter.getSceneName()));
+                    () -> new SnailJobServerException("Scene not found. [{}]", retryDeadLetter.getSceneName()));
 
             Retry retry = RetryTaskConverter.INSTANCE.toRetryTask(retryDeadLetter);
             retry.setRetryStatus(RetryStatusEnum.RUNNING.getStatus());
@@ -125,15 +126,19 @@ public class RetryDeadLetterServiceImpl implements RetryDeadLetterService {
             waitRollbackList.add(retry);
         }
 
-        TaskAccess<Retry> retryTaskAccess = accessTemplate.getRetryAccess();
-        Assert.isTrue(waitRollbackList.size() == retryTaskAccess.insertBatch( waitRollbackList),
-                () -> new SnailJobServerException("新增重试任务失败"));
+        try {
+            TaskAccess<Retry> retryTaskAccess = accessTemplate.getRetryAccess();
+            Assert.isTrue(waitRollbackList.size() == retryTaskAccess.insertBatch( waitRollbackList),
+                    () -> new SnailJobServerException("Failed to add retry task"));
+        } catch (DuplicateKeyException e) {
+            throw new SnailJobServerException("Duplicate retry task");
+        }
 
         Set<Long> waitDelRetryDeadLetterIdSet = StreamUtils.toSet(retryDeadLetterList, RetryDeadLetter::getId);
         Assert.isTrue(waitDelRetryDeadLetterIdSet.size() == retryDeadLetterAccess.delete(
                         new LambdaQueryWrapper<RetryDeadLetter>()
                                 .in(RetryDeadLetter::getId, waitDelRetryDeadLetterIdSet)),
-                () -> new SnailJobServerException("删除死信队列数据失败"));
+                () -> new SnailJobServerException("Failed to delete dead letter queue data"));
         return 1;
     }
 
@@ -146,7 +151,7 @@ public class RetryDeadLetterServiceImpl implements RetryDeadLetterService {
                         new LambdaQueryWrapper<RetryDeadLetter>()
                                 .eq(RetryDeadLetter::getNamespaceId, namespaceId)
                                 .in(RetryDeadLetter::getId, deadLetterVO.getIds())),
-                () -> new SnailJobServerException("删除死信任务失败"));
+                () -> new SnailJobServerException("Failed to delete dead letter task"));
 
         return Boolean.TRUE;
     }

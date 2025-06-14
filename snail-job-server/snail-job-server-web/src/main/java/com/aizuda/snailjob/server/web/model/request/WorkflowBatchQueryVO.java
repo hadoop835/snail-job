@@ -1,6 +1,6 @@
 package com.aizuda.snailjob.server.web.model.request;
 
-import com.aizuda.snailjob.server.web.model.base.BaseQueryVO;
+import com.aizuda.snailjob.server.common.vo.base.BaseQueryVO;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
@@ -13,7 +13,6 @@ import lombok.EqualsAndHashCode;
 @Data
 public class WorkflowBatchQueryVO extends BaseQueryVO {
     private String groupName;
-    private String workflowName;
     private Long workflowId;
     private Integer taskBatchStatus;
 }

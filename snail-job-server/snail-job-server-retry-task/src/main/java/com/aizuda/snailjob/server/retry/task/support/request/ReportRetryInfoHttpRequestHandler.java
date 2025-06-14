@@ -16,11 +16,14 @@ import com.aizuda.snailjob.server.model.dto.RetryTaskDTO;
 import com.aizuda.snailjob.server.retry.task.support.generator.retry.TaskContext;
 import com.aizuda.snailjob.server.retry.task.support.generator.retry.TaskGenerator;
 import com.aizuda.snailjob.server.retry.task.service.TaskContextConverter;
+import com.aizuda.snailjob.template.datasource.access.AccessTemplate;
+import com.aizuda.snailjob.template.datasource.persistence.po.GroupConfig;
 import com.github.rholder.retry.*;
 import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.HttpMethod;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.ConcurrencyFailureException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Component;
@@ -30,6 +33,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
@@ -47,6 +51,7 @@ import static com.aizuda.snailjob.common.core.constant.SystemConstants.HTTP_PATH
 @RequiredArgsConstructor
 public class ReportRetryInfoHttpRequestHandler extends PostHttpRequestHandler {
     private final List<TaskGenerator> taskGenerators;
+    private final AccessTemplate accessTemplate;
 
     @Override
     public boolean supports(String path) {
@@ -70,15 +75,15 @@ public class ReportRetryInfoHttpRequestHandler extends PostHttpRequestHandler {
 
             TaskGenerator taskGenerator = taskGenerators.stream()
                     .filter(t -> t.supports(TaskGeneratorSceneEnum.CLIENT_REPORT.getScene()))
-                    .findFirst().orElseThrow(() -> new SnailJobServerException("没有匹配的任务生成器"));
+                    .findFirst().orElseThrow(() -> new SnailJobServerException("No matching task generator found"));
 
-            Assert.notEmpty(args, () -> new SnailJobServerException("上报的数据不能为空. reqId:[{}]", retryRequest.getReqId()));
+            Assert.notEmpty(args, () -> new SnailJobServerException("The reported data cannot be empty. ReqId:[{}]", retryRequest.getReqId()));
             List<RetryTaskDTO> retryTaskList = JsonUtil.parseList(JsonUtil.toJsonString(args[0]), RetryTaskDTO.class);
 
             SnailJobLog.LOCAL.info("begin handler report data. <|>{}<|>", JsonUtil.toJsonString(retryTaskList));
 
             Set<String> set = StreamUtils.toSet(retryTaskList, RetryTaskDTO::getGroupName);
-            Assert.isTrue(set.size() <= 1, () -> new SnailJobServerException("批量上报数据,同一批次只能是相同的组. reqId:[{}]", retryRequest.getReqId()));
+            Assert.isTrue(set.size() <= 1, () -> new SnailJobServerException("Batch report data, the same batch can only be the same group. ReqId:[{}]", retryRequest.getReqId()));
 
             Map<String, List<RetryTaskDTO>> map = StreamUtils.groupByKey(retryTaskList, RetryTaskDTO::getSceneName);
 
@@ -96,7 +101,7 @@ public class ReportRetryInfoHttpRequestHandler extends PostHttpRequestHandler {
                         @Override
                         public <V> void onRetry(final Attempt<V> attempt) {
                             if (attempt.hasException()) {
-                                SnailJobLog.LOCAL.error("数据上报发生异常执行重试. reqId:[{}] count:[{}]",
+                                SnailJobLog.LOCAL.error("Data reporting exception occurred, execute retry. ReqId:[{}] Count:[{}]",
                                         retryRequest.getReqId(), attempt.getAttemptNumber(), attempt.getExceptionCause());
                             }
                         }
@@ -104,13 +109,23 @@ public class ReportRetryInfoHttpRequestHandler extends PostHttpRequestHandler {
                     .build();
 
             String namespaceId = headers.getAsString(HeadersEnum.NAMESPACE.getKey());
+            String groupName = headers.getAsString(HeadersEnum.GROUP_NAME.getKey());
+
+            GroupConfig groupConfig = accessTemplate.getGroupConfigAccess()
+                    .getGroupConfigByGroupName(groupName, namespaceId);
+            if (Objects.isNull(groupConfig)) {
+                throw new SnailJobServerException(
+                        "failed to report data, no group configuration found. groupName:[{}]", groupName);
+            }
 
             retryer.call(() -> {
                 map.forEach(((sceneName, retryTaskDTOS) -> {
                     TaskContext taskContext = new TaskContext();
                     taskContext.setSceneName(sceneName);
                     taskContext.setNamespaceId(namespaceId);
-                    taskContext.setGroupName(set.stream().findFirst().get());
+                    taskContext.setGroupId(groupConfig.getId());
+                    taskContext.setGroupName(groupName);
+                    taskContext.setInitScene(groupConfig.getInitScene());
                     taskContext.setTaskInfos(TaskContextConverter.INSTANCE.toTaskContextInfo(retryTaskDTOS));
 
                     // 生成任务

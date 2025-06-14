@@ -32,4 +32,5 @@ public class SnailJobServerCommonAutoConfiguration {
         scheduler.setThreadNamePrefix("snail-job-alarm-thread-");
         return scheduler;
     }
+
 }

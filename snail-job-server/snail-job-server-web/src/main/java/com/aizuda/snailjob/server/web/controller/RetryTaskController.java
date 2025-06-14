@@ -34,12 +34,6 @@ public class RetryTaskController {
     }
 
     @LoginRequired
-    @GetMapping("/message/list")
-    public RetryTaskLogMessageResponseVO getRetryTaskLogMessagePage(RetryTaskLogMessageQueryVO queryVO) {
-        return retryTaskService.getRetryTaskLogMessagePage(queryVO);
-    }
-
-    @LoginRequired
     @GetMapping("{id}")
     public RetryTaskResponseVO getRetryTaskById(@PathVariable("id") Long id) {
         return retryTaskService.getRetryTaskById(id);
@@ -59,7 +53,7 @@ public class RetryTaskController {
 
     @LoginRequired
     @DeleteMapping("ids")
-    public Boolean batchDelete(@RequestBody @NotEmpty(message = "ids不能为空") Set<Long> ids) {
+    public Boolean batchDelete(@RequestBody @NotEmpty(message = "ids cannot be null") Set<Long> ids) {
         return retryTaskService.batchDelete(ids);
     }
 

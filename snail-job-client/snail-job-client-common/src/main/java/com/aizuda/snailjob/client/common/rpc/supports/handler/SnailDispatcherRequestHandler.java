@@ -8,12 +8,14 @@ import com.aizuda.snailjob.client.common.cache.EndPointInfoCache;
 import com.aizuda.snailjob.client.common.config.SnailJobProperties;
 import com.aizuda.snailjob.client.common.exception.SnailJobClientException;
 import com.aizuda.snailjob.client.common.rpc.client.RequestMethod;
+import com.aizuda.snailjob.client.common.rpc.supports.handler.grpc.GrpcRequest;
+import com.aizuda.snailjob.client.common.rpc.supports.handler.netty.NettyHttpRequest;
 import com.aizuda.snailjob.client.common.rpc.supports.http.HttpRequest;
 import com.aizuda.snailjob.client.common.rpc.supports.http.HttpResponse;
 import com.aizuda.snailjob.client.common.rpc.supports.scan.EndPointInfo;
 import com.aizuda.snailjob.common.core.constant.SystemConstants;
 import com.aizuda.snailjob.common.core.enums.StatusEnum;
-import com.aizuda.snailjob.common.core.grpc.auto.GrpcSnailJobRequest;
+import com.aizuda.snailjob.common.core.grpc.auto.SnailJobGrpcRequest;
 import com.aizuda.snailjob.common.core.grpc.auto.Metadata;
 import com.aizuda.snailjob.common.core.model.SnailJobRpcResult;
 import com.aizuda.snailjob.common.core.model.Result;
@@ -23,8 +25,6 @@ import com.aizuda.snailjob.common.log.SnailJobLog;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.util.ByteBufferBackedInputStream;
-import com.google.protobuf.Any;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.util.ReflectionUtils;
@@ -32,7 +32,6 @@ import org.springframework.util.ReflectionUtils;
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
 import java.lang.reflect.Type;
-import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -61,7 +60,7 @@ public class SnailDispatcherRequestHandler {
             String snailJobAuth = request.getHeaders().getAsString(SystemConstants.SNAIL_JOB_AUTH_TOKEN);
             String configToken = Optional.ofNullable(snailJobProperties.getToken()).orElse(SystemConstants.DEFAULT_TOKEN);
             if (!configToken.equals(snailJobAuth)) {
-                throw new SnailJobClientException("认证失败.【请检查配置的Token是否正确】");
+                throw new SnailJobClientException("Authentication failed. [Please check if the configured Token is correct]");
             }
 
             UrlBuilder builder = UrlBuilder.ofHttp(request.getUri());
@@ -69,7 +68,7 @@ public class SnailDispatcherRequestHandler {
 
             endPointInfo = EndPointInfoCache.get(builder.getPathStr(), requestMethod);
             if (Objects.isNull(endPointInfo)) {
-                throw new SnailJobClientException("无法找到对应的处理请检查对应的包是否正确引入. " +
+                throw new SnailJobClientException(" Cannot find corresponding processing, please check if the corresponding package is correctly introduced." +
                         "path:[{}] requestMethod:[{}]", builder.getPathStr(), requestMethod);
             }
 
@@ -124,7 +123,7 @@ public class SnailDispatcherRequestHandler {
 
         List<HandlerInterceptor> handlerInterceptors = handlerInterceptors();
 
-        GrpcSnailJobRequest snailJobRequest = request.getSnailJobRequest();
+        SnailJobGrpcRequest snailJobRequest = request.getSnailJobRequest();
         EndPointInfo endPointInfo = null;
         Result resultObj = null;
         Exception e = null;
@@ -134,19 +133,19 @@ public class SnailDispatcherRequestHandler {
             String snailJobAuth = headersMap.get(SystemConstants.SNAIL_JOB_AUTH_TOKEN);
             String configToken = Optional.ofNullable(snailJobProperties.getToken()).orElse(SystemConstants.DEFAULT_TOKEN);
             if (!configToken.equals(snailJobAuth)) {
-                throw new SnailJobClientException("认证失败.【请检查配置的Token是否正确】");
+                throw new SnailJobClientException("Authentication failed. [Please check if the configured Token is correct]");
             }
 
             UrlBuilder builder = UrlBuilder.ofHttp(httpRequest.getUri());
             endPointInfo = EndPointInfoCache.get(builder.getPathStr(), RequestMethod.POST);
             if (Objects.isNull(endPointInfo)) {
-                throw new SnailJobClientException("无法找到对应的处理请检查对应的包是否正确引入. " +
+                throw new SnailJobClientException(" Cannot find corresponding processing, please check if the corresponding package is correctly introduced." +
                                                   "path:[{}] requestMethod:[{}]", builder.getPathStr());
             }
 
             Class<?>[] paramTypes = endPointInfo.getMethod().getParameterTypes();
-            GrpcSnailJobRequest grpcSnailJobRequest = request.getSnailJobRequest();
-            Object[] args = JsonUtil.parseObject(grpcSnailJobRequest.getBody(), Object[].class);
+            SnailJobGrpcRequest snailJobGrpcRequest = request.getSnailJobRequest();
+            Object[] args = JsonUtil.parseObject(snailJobGrpcRequest.getBody(), Object[].class);
 
             Object[] deSerialize = (Object[]) deSerialize(JsonUtil.toJsonString(args), endPointInfo.getMethod(),
                 httpRequest, httpResponse);
