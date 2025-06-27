@@ -1,8 +1,8 @@
 package com.aizuda.snailjob.server.common.config;
 
 import com.aizuda.snailjob.common.core.alarm.email.SnailJobMailProperties;
-import com.aizuda.snailjob.common.core.constant.SystemConstants;
 import com.aizuda.snailjob.common.core.enums.RpcTypeEnum;
+import com.aizuda.snailjob.common.core.util.NetUtil;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -42,24 +42,15 @@ public class SystemProperties {
     private int jobPullPageSize = 1000;
 
     /**
-     * netty 端口
-     * see: serverPort
-     */
-    @Deprecated
-    private Integer nettyPort;
-
-    /**
      * 服务端端口
      */
     private int serverPort = 17888;
 
+
     /**
-     * 获取服务端端口
+     * 服务端地址
      */
-    public int getServerPort() {
-        // since: 1.3.0-beta1 兼容nettyPort
-        return Objects.isNull(nettyPort) ? serverPort : nettyPort;
-    }
+    private String serverHost = NetUtil.getLocalIpStr();
 
     /**
      * server token
@@ -128,9 +119,9 @@ public class SystemProperties {
 
         private int maxInboundMessageSize = 10 * 1024 * 1024;
 
-        private Duration keepAliveTime = Duration.of(2, ChronoUnit.HOURS);
+        private Duration keepAliveTime = Duration.of(30, ChronoUnit.SECONDS);
 
-        private Duration keepAliveTimeout = Duration.of(20, ChronoUnit.SECONDS);
+        private Duration keepAliveTimeout = Duration.of(10, ChronoUnit.SECONDS);
 
         private Duration permitKeepAliveTime = Duration.of(5, ChronoUnit.MINUTES);
 
@@ -143,11 +134,11 @@ public class SystemProperties {
 
         private int maxInboundMessageSize = 10 * 1024 * 1024;
 
-        private Duration keepAliveTime = Duration.of(2, ChronoUnit.HOURS);
+        private Duration keepAliveTime = Duration.of(30, ChronoUnit.SECONDS);
 
-        private Duration keepAliveTimeout = Duration.of(20, ChronoUnit.SECONDS);
+        private Duration keepAliveTimeout = Duration.of(10, ChronoUnit.SECONDS);
 
-        private Duration permitKeepAliveTime = Duration.of(5, ChronoUnit.MINUTES);
+        private Duration idleTimeout = Duration.of(5, ChronoUnit.MINUTES);
 
         private ThreadPoolConfig clientTp = new ThreadPoolConfig(16, 16, 1, TimeUnit.SECONDS, 10000);
 

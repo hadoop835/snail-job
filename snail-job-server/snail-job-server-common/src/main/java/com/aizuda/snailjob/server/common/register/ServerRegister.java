@@ -6,12 +6,14 @@ import cn.hutool.core.util.StrUtil;
 import com.aizuda.snailjob.common.core.enums.NodeTypeEnum;
 import com.aizuda.snailjob.common.core.util.JsonUtil;
 import com.aizuda.snailjob.common.core.util.NetUtil;
+import com.aizuda.snailjob.common.core.util.SnailJobVersion;
 import com.aizuda.snailjob.common.core.util.StreamUtils;
 import com.aizuda.snailjob.common.log.SnailJobLog;
 import com.aizuda.snailjob.server.common.cache.CacheConsumerGroup;
-import com.aizuda.snailjob.server.common.cache.CacheRegisterTable;
 import com.aizuda.snailjob.server.common.config.SystemProperties;
+import com.aizuda.snailjob.server.common.convert.RegisterNodeInfoConverter;
 import com.aizuda.snailjob.server.common.dto.ServerNodeExtAttrs;
+import com.aizuda.snailjob.server.common.handler.InstanceManager;
 import com.aizuda.snailjob.template.datasource.persistence.po.ServerNode;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.google.common.collect.Lists;
@@ -44,7 +46,7 @@ public class ServerRegister extends AbstractRegister {
     public static final String CURRENT_CID;
     public static final String GROUP_NAME = "DEFAULT_SERVER";
     public static final String NAMESPACE_ID = "DEFAULT_SERVER_NAMESPACE_ID";
-
+    private final InstanceManager instanceManager;
     private final SystemProperties systemProperties;
     private final ServerProperties serverProperties;
 
@@ -62,10 +64,11 @@ public class ServerRegister extends AbstractRegister {
         // 新增扩展参数
         ServerNodeExtAttrs serverNodeExtAttrs = new ServerNodeExtAttrs();
         serverNodeExtAttrs.setWebPort(serverProperties.getPort());
+        serverNodeExtAttrs.setSystemVersion(SnailJobVersion.getVersion());
 
         context.setGroupName(GROUP_NAME);
         context.setHostId(CURRENT_CID);
-        context.setHostIp(NetUtil.getLocalIpStr());
+        context.setHostIp(systemProperties.getServerHost());
         context.setHostPort(systemProperties.getServerPort());
         context.setContextPath(Optional.ofNullable(serverProperties.getServlet().getContextPath()).orElse(StrUtil.EMPTY));
         context.setNamespaceId(NAMESPACE_ID);
@@ -103,7 +106,7 @@ public class ServerRegister extends AbstractRegister {
                                 .in(ServerNode::getGroupName, allConsumerGroupName.keySet()));
                 for (final ServerNode node : serverNodes) {
                     // 刷新全量本地缓存
-                    CacheRegisterTable.addOrUpdate(node);
+                    instanceManager.registerOrUpdate(RegisterNodeInfoConverter.INSTANCE.toRegisterNodeInfo(node));
                     // 刷新过期时间
                     CacheConsumerGroup.addOrUpdate(node.getGroupName(), node.getNamespaceId());
                 }

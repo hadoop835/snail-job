@@ -1,5 +1,8 @@
 package com.aizuda.snailjob.server.retry.task.support.dispatch;
 
+import com.aizuda.snailjob.server.common.dto.*;
+import com.aizuda.snailjob.server.common.handler.InstanceManager;
+import com.aizuda.snailjob.server.common.rpc.client.grpc.GrpcClientInvokeHandlerV2;
 import org.apache.pekko.actor.AbstractActor;
 import org.apache.pekko.actor.ActorRef;
 import com.aizuda.snailjob.client.model.request.RetryCallbackRequest;
@@ -8,10 +11,6 @@ import com.aizuda.snailjob.common.core.enums.StatusEnum;
 import com.aizuda.snailjob.common.core.model.Result;
 import com.aizuda.snailjob.common.log.SnailJobLog;
 import com.aizuda.snailjob.server.common.pekko.ActorGenerator;
-import com.aizuda.snailjob.server.common.cache.CacheRegisterTable;
-import com.aizuda.snailjob.server.common.dto.JobLogMetaDTO;
-import com.aizuda.snailjob.server.common.dto.RegisterNodeInfo;
-import com.aizuda.snailjob.server.common.dto.RetryLogMetaDTO;
 import com.aizuda.snailjob.server.common.rpc.client.RequestBuilder;
 import com.aizuda.snailjob.server.common.rpc.client.SnailJobRetryListener;
 import com.aizuda.snailjob.server.common.util.ClientInfoUtils;
@@ -51,6 +50,7 @@ import java.util.Objects;
 public class RequestCallbackClientActor extends AbstractActor {
     private final RetryTaskMapper retryTaskMapper;
     private final RetryMapper retryMapper;
+    private final InstanceManager instanceManager;
 
     @Override
     public Receive createReceive() {
@@ -66,12 +66,12 @@ public class RequestCallbackClientActor extends AbstractActor {
     private void doCallback(RequestCallbackExecutorDTO executorDTO) {
         long nowMilli = DateUtils.toNowMilli();
         // 检查客户端是否存在
-        RegisterNodeInfo registerNodeInfo = CacheRegisterTable.getServerNode(
-                executorDTO.getGroupName(),
-                executorDTO.getNamespaceId(),
-                executorDTO.getClientId()
-        );
-        if (Objects.isNull(registerNodeInfo)) {
+        InstanceLiveInfo instanceLiveInfo = instanceManager.getInstanceALiveInfoSet(InstanceKey.builder()
+                .namespaceId(executorDTO.getNamespaceId())
+                .groupName(executorDTO.getGroupName())
+                .hostId(executorDTO.getClientId())
+                .build());
+        if (Objects.isNull(instanceLiveInfo)) {
             taskExecuteFailure(executorDTO, "Client does not exist");
             JobLogMetaDTO jobLogMetaDTO = RetryTaskConverter.INSTANCE.toJobLogDTO(executorDTO);
             jobLogMetaDTO.setTimestamp(nowMilli);
@@ -95,7 +95,7 @@ public class RequestCallbackClientActor extends AbstractActor {
         try {
 
             // 构建请求客户端对象
-            RetryRpcClient rpcClient = buildRpcClient(registerNodeInfo, executorDTO);
+            RetryRpcClient rpcClient = buildRpcClient(instanceLiveInfo, executorDTO);
             Result<Boolean> dispatch = rpcClient.callback(retryCallbackRequest);
             if (dispatch.getStatus() == StatusEnum.YES.getStatus()) {
                 SnailJobLog.LOCAL.info("RetryTaskId:[{}] Task scheduled successfully.", executorDTO.getRetryTaskId());
@@ -140,20 +140,30 @@ public class RequestCallbackClientActor extends AbstractActor {
 
         @Override
         public <V> void onRetry(final Attempt<V> attempt) {
-            if (attempt.getAttemptNumber() > 1) {
-                // 更新最新负载节点
-                String hostId = (String) properties.get("HOST_ID");
-                String hostIp = (String) properties.get("HOST_IP");
-                Integer hostPort = (Integer) properties.get("HOST_PORT");
+            // 负载节点
+            if (attempt.hasException()) {
+                JobLogMetaDTO jobLogMetaDTO = RetryTaskConverter.INSTANCE.toJobLogDTO(executorDTO);
+                jobLogMetaDTO.setTimestamp(DateUtils.toNowMilli());
+                SnailJobLog.REMOTE.error("Task scheduling failed attempt retry. Task instance ID:[{}] retryCount:[{}]. <|>{}<|>",
+                        executorDTO.getRetryTaskId(), attempt.getAttemptNumber(), jobLogMetaDTO, attempt.getExceptionCause());
+                return;
+            }
 
-                RetryTask retryTask = new RetryTask();
-                retryTask.setId(executorDTO.getRetryTaskId());
-                RegisterNodeInfo realNodeInfo = new RegisterNodeInfo();
-                realNodeInfo.setHostIp(hostIp);
-                realNodeInfo.setHostPort(Integer.valueOf(hostPort));
-                realNodeInfo.setHostId(hostId);
-                retryTask.setClientInfo(ClientInfoUtils.generate(realNodeInfo));
-                retryTaskMapper.updateById(retryTask);
+            // 更新最新负载节点
+            if (attempt.hasResult() && attempt.getAttemptNumber() > 1) {
+                Map<String, Object> properties = properties();
+                InstanceLiveInfo instanceLiveInfo = (InstanceLiveInfo) properties.get(GrpcClientInvokeHandlerV2.NEW_INSTANCE_LIVE_INFO);
+                if (Objects.nonNull(instanceLiveInfo)) {
+                    RegisterNodeInfo nodeInfo = instanceLiveInfo.getNodeInfo();
+                    RetryTask retryTask = new RetryTask();
+                    retryTask.setId(executorDTO.getRetryTaskId());
+                    RegisterNodeInfo realNodeInfo = new RegisterNodeInfo();
+                    realNodeInfo.setHostIp(nodeInfo.getHostIp());
+                    realNodeInfo.setHostPort(nodeInfo.getHostPort());
+                    realNodeInfo.setHostId(nodeInfo.getHostId());
+                    retryTask.setClientInfo(ClientInfoUtils.generate(realNodeInfo));
+                    retryTaskMapper.updateById(retryTask);
+                }
             }
 
         }
@@ -164,9 +174,9 @@ public class RequestCallbackClientActor extends AbstractActor {
         }
     }
 
-    private RetryRpcClient buildRpcClient(RegisterNodeInfo registerNodeInfo, RequestCallbackExecutorDTO executorDTO) {
+    private RetryRpcClient buildRpcClient(InstanceLiveInfo instanceLiveInfo, RequestCallbackExecutorDTO executorDTO) {
         return RequestBuilder.<RetryRpcClient, Result>newBuilder()
-                .nodeInfo(registerNodeInfo)
+                .nodeInfo(instanceLiveInfo)
                 .failRetry(true)
                 .failover(true)
                 .retryTimes(3)
@@ -175,6 +185,7 @@ public class RequestCallbackClientActor extends AbstractActor {
                 .allocKey(String.valueOf(executorDTO.getRetryTaskId()))
                 .retryListener(new RetryExecutorRetryListener(executorDTO))
                 .client(RetryRpcClient.class)
+                .targetLabels(executorDTO.getLabels())
                 .build();
     }
 

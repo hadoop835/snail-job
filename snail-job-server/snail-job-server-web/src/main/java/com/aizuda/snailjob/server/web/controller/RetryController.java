@@ -56,6 +56,7 @@ public class RetryController {
         return new Result<>(retryService.idempotentIdGenerate(generateRetryIdempotentIdVO));
     }
 
+
     @LoginRequired
     @PutMapping("/batch")
     public Integer updateRetryTaskExecutorName(@RequestBody @Validated RetryUpdateExecutorNameRequestVO requestVO) {

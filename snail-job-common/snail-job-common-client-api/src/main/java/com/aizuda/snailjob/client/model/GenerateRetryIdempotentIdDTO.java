@@ -19,4 +19,6 @@ public class GenerateRetryIdempotentIdDTO {
     private String argsStr;
     @NotBlank(message = "executorName cannot be null")
     private String executorName;
+    @NotBlank(message = "serializerName cannot be null")
+    private String serializerName;
 }

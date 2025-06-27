@@ -4,8 +4,7 @@ import cn.hutool.core.collection.CollUtil;
 import com.aizuda.snailjob.common.core.util.StreamUtils;
 import com.aizuda.snailjob.common.log.SnailJobLog;
 import com.aizuda.snailjob.server.common.Lifecycle;
-import com.aizuda.snailjob.server.common.cache.CacheRegisterTable;
-import com.aizuda.snailjob.server.common.dto.RegisterNodeInfo;
+import com.aizuda.snailjob.server.common.handler.InstanceManager;
 import com.aizuda.snailjob.server.common.register.ServerRegister;
 import com.aizuda.snailjob.server.common.schedule.AbstractSchedule;
 import com.aizuda.snailjob.template.datasource.persistence.mapper.ServerNodeMapper;
@@ -19,8 +18,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 /**
  * 删除过期下线机器
@@ -34,6 +31,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class OfflineNodeSchedule extends AbstractSchedule implements Lifecycle {
     private final ServerNodeMapper serverNodeMapper;
+    private final InstanceManager instanceManager;
 
     @Override
     protected void doExecute() {
@@ -51,17 +49,25 @@ public class OfflineNodeSchedule extends AbstractSchedule implements Lifecycle {
                 serverNodeMapper.deleteByIds(StreamUtils.toSet(serverNodes, ServerNode::getId));
             }
 
-            Set<RegisterNodeInfo> allPods = CacheRegisterTable.getAllPods();
-            Set<RegisterNodeInfo> waitOffline = allPods.stream().filter(registerNodeInfo -> registerNodeInfo.getExpireAt().isBefore(endTime)).collect(
-                    Collectors.toSet());
-            Set<String> podIds = StreamUtils.toSet(waitOffline, RegisterNodeInfo::getHostId);
-            if (CollUtil.isEmpty(podIds)) {
-                return;
-            }
-
-            for (final RegisterNodeInfo registerNodeInfo : waitOffline) {
-                CacheRegisterTable.remove(registerNodeInfo.getGroupName(), registerNodeInfo.getNamespaceId(), registerNodeInfo.getHostId());
-            }
+//            Set<InstanceLiveInfo> allInstances = instanceManager.getAllInstances();
+//            Set<RegisterNodeInfo> waitOffline = allInstances
+//                    .stream()
+//                    .filter(instanceLiveInfo -> !instanceLiveInfo.isAlive())
+//                    .map(InstanceLiveInfo::getNodeInfo)
+//                    .collect(Collectors.toSet());
+//            Set<String> podIds = StreamUtils.toSet(waitOffline, RegisterNodeInfo::getHostId);
+//            if (CollUtil.isEmpty(podIds)) {
+//                return;
+//            }
+//
+//            for (final RegisterNodeInfo registerNodeInfo : waitOffline) {
+//                InstanceKey instanceKey = InstanceKey.builder()
+//                        .namespaceId(registerNodeInfo.getNamespaceId())
+//                        .groupName(registerNodeInfo.getGroupName())
+//                        .hostId(registerNodeInfo.getHostId())
+//                        .build();
+//                instanceManager.remove(instanceKey);
+//            }
 
         } catch (Exception e) {
             SnailJobLog.LOCAL.error("Clear offline node failed", e);

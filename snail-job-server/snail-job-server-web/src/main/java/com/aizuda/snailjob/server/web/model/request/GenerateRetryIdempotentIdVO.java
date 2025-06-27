@@ -34,4 +34,10 @@ public class GenerateRetryIdempotentIdVO {
      */
     @NotBlank(message = "Executor cannot be null")
     private String executorName;
+
+    /**
+     * 参数序列化器名称
+     */
+    @NotBlank(message = "serializerName cannot be null")
+    private String serializerName;
 }

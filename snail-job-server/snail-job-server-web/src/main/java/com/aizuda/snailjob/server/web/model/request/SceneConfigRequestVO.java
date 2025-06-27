@@ -3,6 +3,7 @@ package com.aizuda.snailjob.server.web.model.request;
 import com.aizuda.snailjob.common.core.constant.SystemConstants;
 import jakarta.validation.constraints.*;
 import lombok.Data;
+import org.hibernate.validator.constraints.Length;
 
 import java.util.Set;
 
@@ -97,4 +98,14 @@ public class SceneConfigRequestVO {
      * 回调间隔时间
      */
     private String cbTriggerInterval;
+
+    /**
+     * 负责人id
+     */
+    private Long ownerId;
+
+    /**
+     * 标签
+     */
+    private String labels;
 }

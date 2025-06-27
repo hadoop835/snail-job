@@ -11,6 +11,7 @@ import com.aizuda.snailjob.common.core.util.StreamUtils;
 import com.aizuda.snailjob.server.common.WaitStrategy;
 import com.aizuda.snailjob.server.common.config.SystemProperties;
 import com.aizuda.snailjob.server.common.dto.PartitionTask;
+import com.aizuda.snailjob.server.common.dto.PointInTimeDTO;
 import com.aizuda.snailjob.server.common.enums.JobTaskExecutorSceneEnum;
 import com.aizuda.snailjob.server.common.enums.SyetemTaskTypeEnum;
 import com.aizuda.snailjob.server.common.exception.SnailJobServerException;
@@ -18,6 +19,7 @@ import com.aizuda.snailjob.server.common.strategy.WaitStrategies;
 import com.aizuda.snailjob.server.common.util.CronUtils;
 import com.aizuda.snailjob.server.common.util.DateUtils;
 import com.aizuda.snailjob.server.common.util.PartitionTaskUtils;
+import com.aizuda.snailjob.server.common.util.TriggerIntervalUtils;
 import com.aizuda.snailjob.server.job.task.dto.JobTaskPrepareDTO;
 import com.aizuda.snailjob.server.job.task.support.JobPrepareHandler;
 import com.aizuda.snailjob.server.job.task.support.JobTaskConverter;
@@ -39,6 +41,7 @@ import com.aizuda.snailjob.template.datasource.persistence.po.Job;
 import com.aizuda.snailjob.template.datasource.persistence.po.JobSummary;
 import com.aizuda.snailjob.template.datasource.persistence.po.SystemUser;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.PageDTO;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
@@ -49,7 +52,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.validation.annotation.Validated;
 
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.*;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * @author opensnail
@@ -70,14 +77,14 @@ public class JobServiceImpl implements JobService {
     private final JobSummaryMapper jobSummaryMapper;
     private final SystemUserMapper systemUserMapper;
 
-    private static Long calculateNextTriggerAt(final JobRequestVO jobRequestVO, Long time) {
-        if (Objects.equals(jobRequestVO.getTriggerType(), SystemConstants.WORKFLOW_TRIGGER_TYPE)) {
+    private static Long calculateNextTriggerAt(final Job job, Long time) {
+        if (Objects.equals(job.getTriggerType(), SystemConstants.WORKFLOW_TRIGGER_TYPE)) {
             return 0L;
         }
 
-        WaitStrategy waitStrategy = WaitStrategies.WaitStrategyEnum.getWaitStrategy(jobRequestVO.getTriggerType());
+        WaitStrategy waitStrategy = WaitStrategies.WaitStrategyEnum.getWaitStrategy(job.getTriggerType());
         WaitStrategies.WaitStrategyContext waitStrategyContext = new WaitStrategies.WaitStrategyContext();
-        waitStrategyContext.setTriggerInterval(jobRequestVO.getTriggerInterval());
+        waitStrategyContext.setTriggerInterval(job.getTriggerInterval());
         waitStrategyContext.setNextTriggerAt(time);
         return waitStrategy.computeTriggerTime(waitStrategyContext);
     }
@@ -145,12 +152,20 @@ public class JobServiceImpl implements JobService {
         // 判断常驻任务
         Job job = JobConverter.INSTANCE.convert(jobRequestVO);
         job.setResident(isResident(jobRequestVO));
+
+        // check triggerInterval
+        checkTriggerInterval(jobRequestVO);
+
         job.setBucketIndex(HashUtil.bkdrHash(jobRequestVO.getGroupName() + jobRequestVO.getJobName())
                 % systemProperties.getBucketTotal());
-        job.setNextTriggerAt(calculateNextTriggerAt(jobRequestVO, DateUtils.toNowMilli()));
+        job.setNextTriggerAt(calculateNextTriggerAt(job, DateUtils.toNowMilli()));
         job.setNamespaceId(UserSessionUtils.currentUserSession().getNamespaceId());
         job.setId(null);
         return 1 == jobMapper.insert(job);
+    }
+
+    private void checkTriggerInterval(JobRequestVO jobRequestVO) {
+        TriggerIntervalUtils.checkTriggerInterval(jobRequestVO.getTriggerInterval(), jobRequestVO.getTriggerType());
     }
 
     @Override
@@ -165,20 +180,23 @@ public class JobServiceImpl implements JobService {
         updateJob.setResident(isResident(jobRequestVO));
         updateJob.setNamespaceId(job.getNamespaceId());
 
+        // check triggerInterval
+        checkTriggerInterval(jobRequestVO);
+
         // 工作流任务
         if (Objects.equals(jobRequestVO.getTriggerType(), SystemConstants.WORKFLOW_TRIGGER_TYPE)) {
-            job.setNextTriggerAt(0L);
+            updateJob.setNextTriggerAt(0L);
             // 非常驻任务 > 非常驻任务
         } else if (Objects.equals(job.getResident(), StatusEnum.NO.getStatus()) && Objects.equals(
                 updateJob.getResident(),
                 StatusEnum.NO.getStatus())) {
-            updateJob.setNextTriggerAt(calculateNextTriggerAt(jobRequestVO, DateUtils.toNowMilli()));
+            updateJob.setNextTriggerAt(calculateNextTriggerAt(updateJob, DateUtils.toNowMilli()));
         } else if (Objects.equals(job.getResident(), StatusEnum.YES.getStatus()) && Objects.equals(
                 updateJob.getResident(), StatusEnum.NO.getStatus())) {
             // 常驻任务的触发时间
             long time = Optional.ofNullable(ResidentTaskCache.get(jobRequestVO.getId()))
                     .orElse(DateUtils.toNowMilli());
-            updateJob.setNextTriggerAt(calculateNextTriggerAt(jobRequestVO, time));
+            updateJob.setNextTriggerAt(calculateNextTriggerAt(updateJob, time));
             // 老的是不是常驻任务 新的是常驻任务 需要使用当前时间计算下次触发时间
         } else if (Objects.equals(job.getResident(), StatusEnum.NO.getStatus()) && Objects.equals(
                 updateJob.getResident(), StatusEnum.YES.getStatus())) {
@@ -187,7 +205,11 @@ public class JobServiceImpl implements JobService {
 
         // 禁止更新组
         updateJob.setGroupName(null);
-        return 1 == jobMapper.updateById(updateJob);
+
+        LambdaUpdateWrapper<Job> updateWrapper = new LambdaUpdateWrapper<>();
+        updateWrapper.eq(Job::getId, jobRequestVO.getId());
+        updateWrapper.set(Job::getOwnerId, jobRequestVO.getOwnerId());
+        return 1 == jobMapper.update(updateJob, updateWrapper);
     }
 
     private Integer isResident(JobRequestVO jobRequestVO) {
@@ -195,14 +217,16 @@ public class JobServiceImpl implements JobService {
             return StatusEnum.NO.getStatus();
         }
 
-        if (jobRequestVO.getTriggerType() == WaitStrategies.WaitStrategyEnum.FIXED.getType()) {
+        if (Objects.equals(jobRequestVO.getTriggerType(), WaitStrategies.WaitStrategyEnum.FIXED.getType())) {
             if (Integer.parseInt(jobRequestVO.getTriggerInterval()) < 10) {
                 return StatusEnum.YES.getStatus();
             }
-        } else if (jobRequestVO.getTriggerType() == WaitStrategies.WaitStrategyEnum.CRON.getType()) {
+        } else if (Objects.equals(jobRequestVO.getTriggerType(), WaitStrategies.WaitStrategyEnum.CRON.getType())) {
             if (CronUtils.getExecuteInterval(jobRequestVO.getTriggerInterval()) < 10 * 1000) {
                 return StatusEnum.YES.getStatus();
             }
+        } else if (Objects.equals(jobRequestVO.getTriggerType(), WaitStrategies.WaitStrategyEnum.POINT_IN_TIME.getType())) {
+            return StatusEnum.NO.getStatus();
         } else {
             throw new SnailJobServerException("Unknown trigger type");
         }
@@ -210,16 +234,25 @@ public class JobServiceImpl implements JobService {
         return StatusEnum.NO.getStatus();
     }
 
+    private static boolean areAllIntervalsLessThan(List<LocalDateTime> times, Duration maxGap) {
+        if (times.size() < 2) return true;
+
+        for (int i = 1; i < times.size(); i++) {
+            Duration gap = Duration.between(times.get(i - 1), times.get(i));
+            if (gap.compareTo(maxGap) < 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+
     @Override
     public Boolean updateJobStatus(JobStatusUpdateRequestVO jobRequestVO) {
         Assert.notNull(jobRequestVO.getId(), () -> new SnailJobServerException("id cannot be null"));
-        //解决IC76WG 状态停用启用后，因为是实体中设置了 @TableField(updateStrategy = FieldStrategy.ALWAYS , jdbcType= JdbcType.BIGINT ) 所以负责人字段要从新赋值。
-        Job oldJob = jobMapper.selectOne(new LambdaQueryWrapper<Job>().eq(Job::getId, jobRequestVO.getId()));
-        Assert.notNull(oldJob, () -> new SnailJobServerException("job task is find not"));
         Job job = new Job();
         job.setId(jobRequestVO.getId());
         job.setJobStatus(jobRequestVO.getJobStatus());
-        job.setOwnerId(oldJob.getOwnerId());
         return 1 == jobMapper.updateById(job);
     }
 
@@ -255,7 +288,7 @@ public class JobServiceImpl implements JobService {
         String namespaceId = UserSessionUtils.currentUserSession().getNamespaceId();
         List<Job> jobs = jobMapper.selectList(
                 new LambdaQueryWrapper<Job>()
-                        .select(Job::getId, Job::getJobName, Job::getExecutorInfo, Job::getTaskType)
+                        .select(Job::getId, Job::getJobName, Job::getExecutorInfo, Job::getTaskType, Job::getLabels)
                         .eq(Job::getNamespaceId, namespaceId)
                         .eq(Job::getGroupName, groupName)
                         .eq(Job::getDeleted, StatusEnum.NO.getStatus())

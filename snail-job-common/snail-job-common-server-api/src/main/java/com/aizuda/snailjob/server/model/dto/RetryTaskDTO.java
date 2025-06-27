@@ -48,4 +48,8 @@ public class RetryTaskDTO implements Serializable {
      */
     private String extAttrs;
 
+    /**
+     * 序列化器名称
+     */
+    private String serializerName;
 }

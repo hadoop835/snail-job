@@ -16,6 +16,8 @@ package com.aizuda.snailjob.client.core.annotation;
 
 
 import com.aizuda.snailjob.client.core.IdempotentIdGenerate;
+import com.aizuda.snailjob.client.core.MethodResult;
+import com.aizuda.snailjob.client.core.RetryCondition;
 import com.aizuda.snailjob.client.core.callback.complete.RetryCompleteCallback;
 import com.aizuda.snailjob.client.core.callback.complete.SimpleRetryCompleteCallback;
 import com.aizuda.snailjob.client.core.generator.SimpleIdempotentIdGenerate;
@@ -139,5 +141,20 @@ public @interface Retryable {
      * @return Propagation
      */
     Propagation propagation() default Propagation.REQUIRED;
+
+    /**
+     * 基于异常重试时生效
+     * <p>
+     * 当isThrowException=false时，允许用户返回一个自定义值
+     * @return MethodResult
+     */
+    Class<? extends MethodResult> methodResult() default MethodResult.NoMethodResult.class;
+
+    /**
+     * 当方法正常返回结果时，允许用户针对返回结果判断是否需要开启重试
+     *
+     * @return RetryCondition
+     */
+    Class<? extends RetryCondition> retryIfResult() default RetryCondition.NoRetry.class;
 }
 

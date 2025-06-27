@@ -2,9 +2,12 @@ package com.aizuda.snailjob.server.web.service.impl;
 
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.date.LocalDateTimeUtil;
+import cn.hutool.core.lang.Assert;
 import cn.hutool.core.util.ObjUtil;
 import cn.hutool.core.util.StrUtil;
+import com.aizuda.snailjob.common.core.constant.SystemConstants;
 import com.aizuda.snailjob.common.core.enums.NodeTypeEnum;
+import com.aizuda.snailjob.common.core.enums.ServerStatusEnum;
 import com.aizuda.snailjob.common.core.model.Result;
 import com.aizuda.snailjob.common.core.util.JsonUtil;
 import com.aizuda.snailjob.common.core.util.NetUtil;
@@ -12,16 +15,16 @@ import com.aizuda.snailjob.common.core.util.StreamUtils;
 import com.aizuda.snailjob.common.log.SnailJobLog;
 import com.aizuda.snailjob.server.common.dto.DistributeInstance;
 import com.aizuda.snailjob.server.common.dto.ServerNodeExtAttrs;
+import com.aizuda.snailjob.server.common.dto.UpdateClientInfoDTO;
 import com.aizuda.snailjob.server.common.enums.DashboardLineEnum;
 import com.aizuda.snailjob.server.common.enums.SyetemTaskTypeEnum;
 import com.aizuda.snailjob.server.common.enums.SystemModeEnum;
+import com.aizuda.snailjob.server.common.exception.SnailJobServerException;
 import com.aizuda.snailjob.server.common.register.ServerRegister;
+import com.aizuda.snailjob.server.common.register.UpdateClientRegister;
 import com.aizuda.snailjob.server.web.model.base.PageResult;
 import com.aizuda.snailjob.server.web.model.enums.DateTypeEnum;
-import com.aizuda.snailjob.server.web.model.request.JobLineQueryVo;
-import com.aizuda.snailjob.server.web.model.request.LineQueryVO;
-import com.aizuda.snailjob.server.web.model.request.ServerNodeQueryVO;
-import com.aizuda.snailjob.server.web.model.request.UserSessionVO;
+import com.aizuda.snailjob.server.web.model.request.*;
 import com.aizuda.snailjob.server.web.model.response.DashboardCardResponseVO;
 import com.aizuda.snailjob.server.web.model.response.DashboardLineResponseVO;
 import com.aizuda.snailjob.server.web.model.response.DashboardRetryLineResponseVO;
@@ -44,8 +47,10 @@ import com.baomidou.mybatisplus.core.toolkit.StringUtils;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.plugins.pagination.PageDTO;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.jetbrains.annotations.NotNull;
 import org.springframework.boot.autoconfigure.web.ServerProperties;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
@@ -73,6 +78,7 @@ public class DashboardServiceImpl implements DashboardService {
     private final JobSummaryMapper jobSummaryMapper;
     private final RetrySummaryMapper retrySummaryMapper;
     private final ServerProperties serverProperties;
+    private final UpdateClientRegister updateClientRegister;
 
     @Override
     public DashboardCardResponseVO taskRetryJob() {
@@ -312,6 +318,64 @@ public class DashboardServiceImpl implements DashboardService {
             }
         }
         return new PageResult<>(serverNodePageDTO, responseVOList);
+    }
+
+    @Override
+    public Boolean updatePodsStatus(ServerNodeStatusUpdateRequestVO updateRequestVO) {
+        ServerNode serverNode = serverNodeMapper.selectById(updateRequestVO.getId());
+        Assert.notNull(serverNode, () -> new SnailJobServerException("ServerNode not found."));
+        if (serverNode.getNodeType().equals(NodeTypeEnum.SERVER.getType())) {
+            return false;
+        }
+
+        String labels = serverNode.getLabels();
+        Map<String, String> map = JsonUtil.parseConcurrentHashMap(labels);
+        ServerStatusEnum statusEnum = ServerStatusEnum.getByType(updateRequestVO.getServerNodeStatus());
+        Assert.notNull(statusEnum, () -> new SnailJobServerException("ServerNodeStatus not existed"));
+        map.put(SystemConstants.DEFAULT_LABEL.getKey(), statusEnum.getStatus());
+        serverNode.setLabels(JsonUtil.toJsonString(map));
+        Boolean updated = updateLabel(serverNode);
+
+        Assert.isTrue(updated, () -> new SnailJobServerException("update labels error"));
+        return updated;
+    }
+
+
+    @Override
+    public Boolean updatePodsLabels(ServerNodeLabelsUpdateRequestVO updateRequestVO) {
+        ServerNode serverNode = serverNodeMapper.selectById(updateRequestVO.getId());
+        if (serverNode.getNodeType().equals(NodeTypeEnum.SERVER.getType())) {
+            return false;
+        }
+
+        Map<String, String> toUpdateMap = JsonUtil.parseHashMap(updateRequestVO.getLabels());
+
+        String labels = serverNode.getLabels();
+        Map<String, String> dbMap;
+        if(StrUtil.isNotBlank(labels)) {
+            dbMap = JsonUtil.parseHashMap(labels);
+            // 重新放入DEFAULT_LABEL
+            toUpdateMap.put(SystemConstants.DEFAULT_LABEL.getKey(),
+                    dbMap.get(SystemConstants.DEFAULT_LABEL.getKey()));
+        }
+
+        serverNode.setLabels(JsonUtil.toJsonString(toUpdateMap));
+
+        return updateLabel(serverNode);
+    }
+
+    private Boolean updateLabel(ServerNode serverNode) {
+        if (serverNodeMapper.updateById(serverNode) > 0) {
+            UpdateClientInfoDTO clientInfoDTO = new UpdateClientInfoDTO();
+            clientInfoDTO.setHostId(serverNode.getHostId());
+            clientInfoDTO.setHostIp(serverNode.getHostIp());
+            clientInfoDTO.setNamespaceId(serverNode.getNamespaceId());
+            clientInfoDTO.setGroupName(serverNode.getGroupName());
+            clientInfoDTO.setLabels(serverNode.getLabels());
+            return updateClientRegister.updateClientInfo(clientInfoDTO);
+        } else {
+            return false;
+        }
     }
 
 }

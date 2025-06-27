@@ -27,4 +27,7 @@ public class RequestCallbackExecutorDTO extends BaseDTO {
 
     private Long parentId;
 
+    private String serializerName;
+
+    private String labels;
 }

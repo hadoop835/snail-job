@@ -1,5 +1,7 @@
 package com.aizuda.snailjob.common.core.constant;
 
+import cn.hutool.core.lang.Pair;
+
 /**
  * 系统通用常量
  *
@@ -71,6 +73,10 @@ public interface SystemConstants {
         String BEAT = "/beat";
 
         /**
+         * 注册定时任务执行器
+         */
+        String REGISTER_JOB_EXECUTORS = "/register/job/executors";
+        /**
          * 批量上报
          */
         String BATCH_REPORT = "/batch/report";
@@ -141,9 +147,20 @@ public interface SystemConstants {
         String GET_REG_NODES_AND_REFRESH = "/pull/register/queue/v1";
 
         /**
+         * 更新客户端信息
+         */
+        String UPDATE_CLIENT_INFO = "/update/client/info/v1";
+
+        /**
          * 获取重试幂等id
          */
         String RETRY_GENERATE_IDEM_ID = "/retry/generate/idempotent-id/v1";
+
+
+        /**
+         * 反序列化重试参数
+         */
+        String RETRY_DESERIALIZE_ARGS = "/retry/deserialize/args/v1";
 
         String OPENAPI_ADD_JOB = "/api/job/add";
 
@@ -204,6 +221,11 @@ public interface SystemConstants {
      * 默认Token
      */
     String DEFAULT_TOKEN = "SJ_Wyz3dmsdbDOkDujOTSSoBjGQP1BMsVnj";
+
+    /**
+     * 默认version
+     */
+    String DEFAULT_CLIENT_VERSION = "local";
 
     /**
      * AT 所有人
@@ -276,4 +298,9 @@ public interface SystemConstants {
      * 动态分片的root节点
      */
     String ROOT_MAP = "ROOT_MAP";
+
+    /**
+     * 默认的标签
+     */
+    Pair<String, String> DEFAULT_LABEL = Pair.of("state", "up");
 }

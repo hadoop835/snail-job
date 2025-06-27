@@ -29,6 +29,10 @@ public class DateUtils {
         return toLocalDateTime(date.getTime()).toInstant(zoneOffset).toEpochMilli();
     }
 
+    public static LocalDateTime toLocalDateTime(String dateTime) {
+        return LocalDateTime.parse(dateTime, NORM_DATETIME_PATTERN);
+    }
+
     public static long toEpochMilli(LocalDateTime date) {
         return date.toInstant(zoneOffset).toEpochMilli();
     }
@@ -43,6 +47,10 @@ public class DateUtils {
 
     public static LocalDateTime toNowLocalDateTime() {
         return LocalDateTime.now();
+    }
+
+    public static String format(LocalDateTime time) {
+        return format(time, NORM_DATETIME_PATTERN);
     }
 
     public static String format(LocalDateTime time, DateTimeFormatter dateFormatter) {

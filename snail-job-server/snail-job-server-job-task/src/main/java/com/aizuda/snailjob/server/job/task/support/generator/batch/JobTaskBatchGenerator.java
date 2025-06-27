@@ -6,9 +6,9 @@ import com.aizuda.snailjob.common.core.context.SnailSpringContext;
 import com.aizuda.snailjob.common.core.enums.JobNotifySceneEnum;
 import com.aizuda.snailjob.common.core.enums.JobOperationReasonEnum;
 import com.aizuda.snailjob.common.core.enums.JobTaskBatchStatusEnum;
-import com.aizuda.snailjob.server.common.cache.CacheRegisterTable;
 import com.aizuda.snailjob.server.common.enums.JobTaskExecutorSceneEnum;
 import com.aizuda.snailjob.server.common.exception.SnailJobServerException;
+import com.aizuda.snailjob.server.common.handler.InstanceManager;
 import com.aizuda.snailjob.server.common.util.DateUtils;
 import com.aizuda.snailjob.server.job.task.dto.JobTaskFailAlarmEventDTO;
 import com.aizuda.snailjob.server.job.task.dto.JobTimerTaskDTO;
@@ -29,7 +29,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -52,8 +51,8 @@ public class JobTaskBatchGenerator {
     private final WorkflowBatchHandler workflowBatchHandler;
     private final JobTaskBatchHandler jobTaskBatchHandler;
     private final JobMapper jobMapper;
+    private final InstanceManager instanceManager;
 
-    @Transactional
     public JobTaskBatch generateJobTaskBatch(JobTaskBatchGeneratorContext context) {
 
         // 生成一个新的任务
@@ -65,7 +64,7 @@ public class JobTaskBatchGenerator {
 
         // 无执行的节点
         if (Objects.isNull(context.getOperationReason()) && Objects.isNull(context.getTaskBatchStatus()) &&
-                CollUtil.isEmpty(CacheRegisterTable.getServerNodeSet(context.getGroupName(), context.getNamespaceId()))) {
+                CollUtil.isEmpty(instanceManager.getInstanceALiveInfoSet(context.getNamespaceId(), context.getGroupName()))) {
             jobTaskBatch.setTaskBatchStatus(JobTaskBatchStatusEnum.CANCEL.getStatus());
             jobTaskBatch.setOperationReason(JobOperationReasonEnum.NOT_CLIENT.getReason());
         } else {

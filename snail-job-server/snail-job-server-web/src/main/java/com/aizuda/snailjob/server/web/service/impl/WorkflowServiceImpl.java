@@ -21,10 +21,7 @@ import com.aizuda.snailjob.server.common.enums.JobTaskExecutorSceneEnum;
 import com.aizuda.snailjob.server.common.enums.SyetemTaskTypeEnum;
 import com.aizuda.snailjob.server.common.exception.SnailJobServerException;
 import com.aizuda.snailjob.server.common.strategy.WaitStrategies;
-import com.aizuda.snailjob.server.common.util.CronUtils;
-import com.aizuda.snailjob.server.common.util.DateUtils;
-import com.aizuda.snailjob.server.common.util.GraphUtils;
-import com.aizuda.snailjob.server.common.util.PartitionTaskUtils;
+import com.aizuda.snailjob.server.common.util.*;
 import com.aizuda.snailjob.server.web.model.request.UserSessionVO;
 import com.aizuda.snailjob.server.common.vo.request.WorkflowRequestVO;
 import com.aizuda.snailjob.server.job.task.dto.WorkflowTaskPrepareDTO;
@@ -42,12 +39,10 @@ import com.aizuda.snailjob.server.web.service.handler.GroupHandler;
 import com.aizuda.snailjob.server.common.handler.WorkflowHandler;
 import com.aizuda.snailjob.server.web.util.UserSessionUtils;
 import com.aizuda.snailjob.template.datasource.access.AccessTemplate;
-import com.aizuda.snailjob.template.datasource.persistence.mapper.JobMapper;
-import com.aizuda.snailjob.template.datasource.persistence.mapper.JobSummaryMapper;
-import com.aizuda.snailjob.template.datasource.persistence.mapper.WorkflowMapper;
-import com.aizuda.snailjob.template.datasource.persistence.mapper.WorkflowNodeMapper;
+import com.aizuda.snailjob.template.datasource.persistence.mapper.*;
 import com.aizuda.snailjob.template.datasource.persistence.po.*;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.PageDTO;
 import com.google.common.collect.Lists;
 import com.google.common.graph.ElementOrder;
@@ -86,6 +81,7 @@ public class WorkflowServiceImpl implements WorkflowService {
     private final AccessTemplate accessTemplate;
     private final GroupHandler groupHandler;
     private final JobSummaryMapper jobSummaryMapper;
+    private final SystemUserMapper systemUserMapper;
 
     private static Long calculateNextTriggerAt(final WorkflowRequestVO workflowRequestVO, Long time) {
         checkExecuteInterval(workflowRequestVO);
@@ -104,7 +100,7 @@ public class WorkflowServiceImpl implements WorkflowService {
             if (Integer.parseInt(requestVO.getTriggerInterval()) < 10) {
                 throw new SnailJobServerException("Trigger interval must not be less than 10");
             }
-        } else if (requestVO.getTriggerType() == WaitStrategies.WaitStrategyEnum.CRON.getType()) {
+        } else if (Objects.equals(requestVO.getTriggerType(), WaitStrategies.WaitStrategyEnum.CRON.getType())) {
             if (CronUtils.getExecuteInterval(requestVO.getTriggerInterval()) < 10 * 1000) {
                 throw new SnailJobServerException("Trigger interval must not be less than 10");
             }
@@ -122,7 +118,11 @@ public class WorkflowServiceImpl implements WorkflowService {
 
         // 组装工作流信息
         Workflow workflow = WorkflowConverter.INSTANCE.convert(workflowRequestVO);
+
+        checkTriggerInterval(workflowRequestVO);
+
         workflow.setVersion(1);
+        workflowRequestVO.setTriggerInterval(workflow.getTriggerInterval());
         workflow.setNextTriggerAt(calculateNextTriggerAt(workflowRequestVO, DateUtils.toNowMilli()));
         workflow.setFlowInfo(StrUtil.EMPTY);
         workflow.setBucketIndex(
@@ -148,6 +148,10 @@ public class WorkflowServiceImpl implements WorkflowService {
         workflow.setFlowInfo(JsonUtil.toJsonString(GraphUtils.serializeGraphToJson(graph)));
         Assert.isTrue(1 == workflowMapper.updateById(workflow), () -> new SnailJobServerException("Failed to save workflow graph"));
         return true;
+    }
+
+    private void checkTriggerInterval(WorkflowRequestVO workflowRequestVO) {
+        TriggerIntervalUtils.checkTriggerInterval(workflowRequestVO.getTriggerInterval(), workflowRequestVO.getTriggerType());
     }
 
     private MutableGraph<Long> createGraph() {
@@ -185,15 +189,19 @@ public class WorkflowServiceImpl implements WorkflowService {
                         .eq(Workflow::getDeleted, StatusEnum.NO.getStatus())
                         .eq(Workflow::getNamespaceId, userSessionVO.getNamespaceId())
                         .in(CollUtil.isNotEmpty(groupNames), Workflow::getGroupName, groupNames)
-                        .like(StrUtil.isNotBlank(queryVO.getWorkflowName()), Workflow::getWorkflowName,
-                                queryVO.getWorkflowName())
-                        .eq(Objects.nonNull(queryVO.getWorkflowStatus()), Workflow::getWorkflowStatus,
-                                queryVO.getWorkflowStatus())
+                        .like(StrUtil.isNotBlank(queryVO.getWorkflowName()), Workflow::getWorkflowName, queryVO.getWorkflowName())
+                        .eq(Objects.nonNull(queryVO.getWorkflowStatus()), Workflow::getWorkflowStatus, queryVO.getWorkflowStatus())
+                        .eq(Objects.nonNull(queryVO.getOwnerId()), Workflow::getOwnerId, queryVO.getOwnerId())
                         .orderByDesc(Workflow::getId));
 
-        List<WorkflowResponseVO> jobResponseList = WorkflowConverter.INSTANCE.convertListToWorkflowList(page.getRecords());
-
-        return new PageResult<>(pageDTO, jobResponseList);
+        List<WorkflowResponseVO> workflowResponseVOList = WorkflowConverter.INSTANCE.convertListToWorkflowList(page.getRecords());
+        for (WorkflowResponseVO responseVO : workflowResponseVOList) {
+            if (Objects.nonNull(responseVO.getOwnerId())) {
+                SystemUser systemUser = systemUserMapper.selectById(responseVO.getOwnerId());
+                responseVO.setOwnerName(systemUser.getUsername());
+            }
+        }
+        return new PageResult<>(pageDTO, workflowResponseVOList);
     }
 
     @Override
@@ -222,17 +230,23 @@ public class WorkflowServiceImpl implements WorkflowService {
 
         // 保存图信息
         workflow = WorkflowConverter.INSTANCE.convert(workflowRequestVO);
+
+        checkTriggerInterval(workflowRequestVO);
+
         workflow.setId(workflowRequestVO.getId());
         workflow.setVersion(version);
+        workflowRequestVO.setTriggerInterval(workflow.getTriggerInterval());
         workflow.setNextTriggerAt(calculateNextTriggerAt(workflowRequestVO, DateUtils.toNowMilli()));
         workflow.setFlowInfo(JsonUtil.toJsonString(GraphUtils.serializeGraphToJson(graph)));
         // 不允许更新组
         workflow.setGroupName(null);
-        Assert.isTrue(
-                workflowMapper.update(workflow,
-                        new LambdaQueryWrapper<Workflow>()
-                                .eq(Workflow::getId, workflow.getId())
-                                .eq(Workflow::getVersion, version)) > 0,
+
+        LambdaUpdateWrapper<Workflow> updateWrapper = new LambdaUpdateWrapper<>();
+        updateWrapper.eq(Workflow::getId, workflow.getId());
+        updateWrapper.eq(Workflow::getVersion, version);
+        updateWrapper.set(Workflow::getOwnerId, workflowRequestVO.getOwnerId());
+
+        Assert.isTrue(workflowMapper.update(workflow, updateWrapper) > 0,
                 () -> new SnailJobServerException("Update failed"));
 
         return Boolean.TRUE;
@@ -275,7 +289,7 @@ public class WorkflowServiceImpl implements WorkflowService {
         prepareDTO.setNextTriggerAt(DateUtils.toNowMilli());
         prepareDTO.setTaskExecutorScene(JobTaskExecutorSceneEnum.MANUAL_WORKFLOW.getType());
         String tmpWfContext = triggerVO.getTmpWfContext();
-        if (StrUtil.isNotBlank(tmpWfContext) && !JsonUtil.isEmptyJson(tmpWfContext)){
+        if (StrUtil.isNotBlank(tmpWfContext) && !JsonUtil.isEmptyJson(tmpWfContext)) {
             prepareDTO.setWfContext(tmpWfContext);
         }
         terminalWorkflowPrepareHandler.handler(prepareDTO);
@@ -410,6 +424,7 @@ public class WorkflowServiceImpl implements WorkflowService {
                     JobTaskConfig jobTask = nodeInfo.getJobTask();
                     if (Objects.nonNull(jobTask)) {
                         jobTask.setJobName(jobMap.getOrDefault(jobTask.getJobId(), new Job()).getJobName());
+                        jobTask.setLabels(jobMap.getOrDefault(jobTask.getJobId(), new Job()).getLabels());
                     }
                 }).collect(Collectors.toMap(WorkflowDetailResponseVO.NodeInfo::getId, i -> i));
 

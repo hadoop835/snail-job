@@ -4,29 +4,28 @@ import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.lang.Assert;
 import cn.hutool.core.util.ObjUtil;
 import cn.hutool.core.util.StrUtil;
+import com.aizuda.snailjob.client.model.RetryArgsDeserializeDTO;
 import com.aizuda.snailjob.common.core.context.SnailSpringContext;
 import com.aizuda.snailjob.common.core.enums.RetryOperationReasonEnum;
 import com.aizuda.snailjob.common.core.enums.RetryTaskStatusEnum;
 import com.aizuda.snailjob.common.core.util.JsonUtil;
 import com.aizuda.snailjob.common.log.constant.LogFieldConstants;
-import com.aizuda.snailjob.server.common.dto.PartitionTask;
 import com.aizuda.snailjob.server.common.exception.SnailJobServerException;
-import com.aizuda.snailjob.server.common.util.PartitionTaskUtils;
 import com.aizuda.snailjob.server.retry.task.dto.TaskStopJobDTO;
 import com.aizuda.snailjob.server.retry.task.support.handler.RetryTaskStopHandler;
 import com.aizuda.snailjob.server.web.model.base.PageResult;
-import com.aizuda.snailjob.server.web.model.dto.LogMessagePartitionTask;
 import com.aizuda.snailjob.server.web.model.event.WsSendEvent;
 import com.aizuda.snailjob.server.web.model.request.RetryTaskLogMessageQueryVO;
 import com.aizuda.snailjob.server.web.model.request.RetryTaskQueryVO;
 import com.aizuda.snailjob.server.web.model.request.UserSessionVO;
-import com.aizuda.snailjob.server.web.model.response.RetryTaskLogMessageResponseVO;
+import com.aizuda.snailjob.server.web.model.response.RetryResponseVO;
 import com.aizuda.snailjob.server.web.model.response.RetryTaskResponseVO;
+import com.aizuda.snailjob.server.web.service.RetryService;
 import com.aizuda.snailjob.server.web.service.RetryTaskService;
 import com.aizuda.snailjob.server.retry.task.convert.RetryConverter;
-import com.aizuda.snailjob.server.web.service.convert.LogMessagePartitionTaskConverter;
 import com.aizuda.snailjob.server.web.service.convert.RetryTaskLogResponseVOConverter;
 import com.aizuda.snailjob.server.web.service.convert.RetryTaskResponseVOConverter;
+import com.aizuda.snailjob.server.web.service.handler.RetryArgsDeserializeHandler;
 import com.aizuda.snailjob.server.web.timer.LogTimerWheel;
 import com.aizuda.snailjob.server.web.timer.RetryTaskLogTimerTask;
 import com.aizuda.snailjob.server.web.util.UserSessionUtils;
@@ -42,8 +41,6 @@ import com.aizuda.snailjob.template.datasource.persistence.po.RetryTask;
 import com.aizuda.snailjob.template.datasource.persistence.po.RetryTaskLogMessage;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.PageDTO;
-import com.google.common.base.Predicate;
-import com.google.common.collect.Lists;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -51,8 +48,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.function.Consumer;
-import java.util.stream.Collectors;
 
 /**
  * @author: opensnail
@@ -67,6 +62,8 @@ public class RetryTaskServiceImpl implements RetryTaskService {
     private final RetryTaskLogMessageMapper retryTaskLogMessageMapper;
     private final RetryTaskStopHandler retryTaskStopHandler;
     private final AccessTemplate accessTemplate;
+    private final RetryService retryService;
+    private final RetryArgsDeserializeHandler retryArgsDeserializeHandler;
 
     @Override
     public PageResult<List<RetryTaskResponseVO>> getRetryTaskLogPage(RetryTaskQueryVO queryVO) {
@@ -181,7 +178,16 @@ public class RetryTaskServiceImpl implements RetryTaskService {
 
         Retry retry = retryMapper.selectById(retryTask.getRetryId());
         RetryTaskResponseVO responseVO = RetryTaskLogResponseVOConverter.INSTANCE.convert(retryTask);
-        responseVO.setResponseVO(RetryTaskResponseVOConverter.INSTANCE.convert(retry));
+
+        RetryResponseVO retryResponseVO = RetryTaskResponseVOConverter.INSTANCE.convert(retry);
+        RetryArgsDeserializeDTO retryArgsDeserializeDTO = new RetryArgsDeserializeDTO();
+        retryArgsDeserializeDTO.setArgsStr(retryResponseVO.getArgsStr());
+        retryArgsDeserializeDTO.setExecutorName(retryResponseVO.getExecutorName());
+        retryArgsDeserializeDTO.setScene(retryResponseVO.getSceneName());
+        retryArgsDeserializeDTO.setGroup(retryResponseVO.getGroupName());
+        retryArgsDeserializeDTO.setSerializerName(retryResponseVO.getSerializerName());
+        retryResponseVO.setArgsStr(retryArgsDeserializeHandler.deserialize(retryArgsDeserializeDTO));
+        responseVO.setResponseVO(retryResponseVO);
         return responseVO;
     }
 

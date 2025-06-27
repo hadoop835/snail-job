@@ -1,6 +1,11 @@
 package com.aizuda.snailjob.server.web.service.impl;
 
-import  org.apache.pekko.actor.ActorRef;
+import com.aizuda.snailjob.client.model.RetryArgsDeserializeDTO;
+import com.aizuda.snailjob.server.common.dto.InstanceLiveInfo;
+import com.aizuda.snailjob.server.common.dto.InstanceSelectCondition;
+import com.aizuda.snailjob.server.common.handler.InstanceManager;
+import com.aizuda.snailjob.server.web.service.handler.RetryArgsDeserializeHandler;
+import org.apache.pekko.actor.ActorRef;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.lang.Assert;
 import cn.hutool.core.util.StrUtil;
@@ -10,17 +15,12 @@ import com.aizuda.snailjob.common.core.enums.StatusEnum;
 import com.aizuda.snailjob.common.core.model.Result;
 import com.aizuda.snailjob.common.core.util.JsonUtil;
 import com.aizuda.snailjob.common.core.util.StreamUtils;
-import com.aizuda.snailjob.common.log.SnailJobLog;
 import com.aizuda.snailjob.server.common.WaitStrategy;
 import com.aizuda.snailjob.server.common.pekko.ActorGenerator;
-import com.aizuda.snailjob.server.common.cache.CacheRegisterTable;
-import com.aizuda.snailjob.server.common.dto.RegisterNodeInfo;
-import com.aizuda.snailjob.server.common.dto.RetryLogMetaDTO;
 import com.aizuda.snailjob.server.common.enums.RetryTaskExecutorSceneEnum;
 import com.aizuda.snailjob.server.common.enums.SyetemTaskTypeEnum;
 import com.aizuda.snailjob.server.common.enums.TaskGeneratorSceneEnum;
 import com.aizuda.snailjob.server.common.exception.SnailJobServerException;
-import com.aizuda.snailjob.server.common.handler.ClientNodeAllocateHandler;
 import com.aizuda.snailjob.server.common.rpc.client.RequestBuilder;
 import com.aizuda.snailjob.server.common.strategy.WaitStrategies.WaitStrategyContext;
 import com.aizuda.snailjob.server.common.strategy.WaitStrategies.WaitStrategyEnum;
@@ -30,7 +30,6 @@ import com.aizuda.snailjob.server.retry.task.client.RetryRpcClient;
 import com.aizuda.snailjob.server.retry.task.dto.RetryTaskPrepareDTO;
 import com.aizuda.snailjob.server.retry.task.support.generator.retry.TaskContext;
 import com.aizuda.snailjob.server.retry.task.support.generator.retry.TaskGenerator;
-import com.aizuda.snailjob.server.retry.task.support.RetryTaskConverter;
 import com.aizuda.snailjob.server.web.model.base.PageResult;
 import com.aizuda.snailjob.server.web.model.request.*;
 import com.aizuda.snailjob.server.web.model.response.RetryResponseVO;
@@ -57,7 +56,12 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -70,9 +74,6 @@ import static com.aizuda.snailjob.common.core.enums.RetryStatusEnum.ALLOW_DELETE
  */
 @Service
 public class RetryServiceImpl implements RetryService {
-
-    @Autowired
-    private ClientNodeAllocateHandler clientNodeAllocateHandler;
     @Autowired
     private RetryTaskMapper retryTaskMapper;
     @Autowired
@@ -84,6 +85,10 @@ public class RetryServiceImpl implements RetryService {
     private RetryTaskLogMessageMapper retryTaskLogMessageMapper;
     @Autowired
     private TransactionTemplate transactionTemplate;
+    @Autowired
+    private InstanceManager instanceManager;
+    @Autowired
+    private RetryArgsDeserializeHandler retryArgsDeserializeHandler;
 
     @Override
     public PageResult<List<RetryResponseVO>> getRetryPage(RetryQueryVO queryVO) {
@@ -100,7 +105,7 @@ public class RetryServiceImpl implements RetryService {
                 .eq(StrUtil.isNotBlank(queryVO.getIdempotentId()), Retry::getIdempotentId, queryVO.getIdempotentId())
                 .eq(Objects.nonNull(queryVO.getRetryId()), Retry::getId, queryVO.getRetryId())
                 .eq(Objects.nonNull(queryVO.getRetryStatus()), Retry::getRetryStatus, queryVO.getRetryStatus())
-                .eq(Retry::getTaskType,  SyetemTaskTypeEnum.RETRY.getType())
+                .eq(Retry::getTaskType, SyetemTaskTypeEnum.RETRY.getType())
                 .select(Retry::getId, Retry::getBizNo, Retry::getIdempotentId,
                         Retry::getGroupName, Retry::getNextTriggerAt, Retry::getRetryCount,
                         Retry::getRetryStatus, Retry::getUpdateDt, Retry::getCreateDt, Retry::getSceneName,
@@ -133,7 +138,15 @@ public class RetryServiceImpl implements RetryService {
     public RetryResponseVO getRetryById(String groupName, Long id) {
         TaskAccess<Retry> retryTaskAccess = accessTemplate.getRetryAccess();
         Retry retry = retryTaskAccess.one(new LambdaQueryWrapper<Retry>().eq(Retry::getId, id));
-        return RetryTaskResponseVOConverter.INSTANCE.convert(retry);
+        RetryResponseVO retryResponseVO = RetryTaskResponseVOConverter.INSTANCE.convert(retry);
+        RetryArgsDeserializeDTO retryArgsDeserializeDTO = new RetryArgsDeserializeDTO();
+        retryArgsDeserializeDTO.setArgsStr(retryResponseVO.getArgsStr());
+        retryArgsDeserializeDTO.setExecutorName(retryResponseVO.getExecutorName());
+        retryArgsDeserializeDTO.setScene(retryResponseVO.getSceneName());
+        retryArgsDeserializeDTO.setGroup(retryResponseVO.getGroupName());
+        retryArgsDeserializeDTO.setSerializerName(retryResponseVO.getSerializerName());
+        retryResponseVO.setArgsStr(retryArgsDeserializeHandler.deserialize(retryArgsDeserializeDTO));
+        return retryResponseVO;
     }
 
     @Override
@@ -209,18 +222,25 @@ public class RetryServiceImpl implements RetryService {
     public String idempotentIdGenerate(final GenerateRetryIdempotentIdVO generateRetryIdempotentIdVO) {
 
         String namespaceId = UserSessionUtils.currentUserSession().getNamespaceId();
-        Set<RegisterNodeInfo> serverNodes = CacheRegisterTable.getServerNodeSet(
-                generateRetryIdempotentIdVO.getGroupName(),
-                namespaceId);
-        Assert.notEmpty(serverNodes,
-                () -> new SnailJobServerException("Failed to generate idempotentId: No active client nodes exist"));
 
         RetrySceneConfig retrySceneConfig = accessTemplate.getSceneConfigAccess()
                 .getSceneConfigByGroupNameAndSceneName(generateRetryIdempotentIdVO.getGroupName(),
                         generateRetryIdempotentIdVO.getSceneName(), namespaceId);
 
-        RegisterNodeInfo serverNode = clientNodeAllocateHandler.getServerNode(retrySceneConfig.getSceneName(),
-                retrySceneConfig.getGroupName(), retrySceneConfig.getNamespaceId(), retrySceneConfig.getRouteKey());
+        Assert.notNull(retrySceneConfig,
+                () -> new SnailJobServerException("Failed to generate idempotentId: RetrySceneConfig nodes exist"));
+
+        InstanceSelectCondition condition = InstanceSelectCondition
+                .builder()
+                .allocKey(retrySceneConfig.getSceneName())
+                .groupName(retrySceneConfig.getGroupName())
+                .namespaceId(retrySceneConfig.getNamespaceId())
+                .routeKey(retrySceneConfig.getRouteKey())
+                .targetLabels(retrySceneConfig.getLabels())
+                .build();
+        InstanceLiveInfo instance = instanceManager.getALiveInstanceByRouteKey(condition);
+        Assert.notNull(instance,
+                () -> new SnailJobServerException("Failed to generate idempotentId: No active client nodes exist"));
 
         // 委托客户端生成idempotentId
         GenerateRetryIdempotentIdDTO generateRetryIdempotentIdDTO = new GenerateRetryIdempotentIdDTO();
@@ -228,9 +248,14 @@ public class RetryServiceImpl implements RetryService {
         generateRetryIdempotentIdDTO.setScene(generateRetryIdempotentIdVO.getSceneName());
         generateRetryIdempotentIdDTO.setArgsStr(generateRetryIdempotentIdVO.getArgsStr());
         generateRetryIdempotentIdDTO.setExecutorName(generateRetryIdempotentIdVO.getExecutorName());
+        generateRetryIdempotentIdDTO.setSerializerName(generateRetryIdempotentIdVO.getSerializerName());
 
         RetryRpcClient rpcClient = RequestBuilder.<RetryRpcClient, Result>newBuilder()
-                .nodeInfo(serverNode)
+                .nodeInfo(instance)
+                .retryTimes(3)
+                .failover(false)
+                .failRetry(true)
+                .retryInterval(1)
                 .client(RetryRpcClient.class)
                 .build();
 
@@ -398,4 +423,5 @@ public class RetryServiceImpl implements RetryService {
 
         return true;
     }
+
 }

@@ -3,7 +3,9 @@ package com.aizuda.snailjob.server.common.strategy;
 import cn.hutool.core.lang.Assert;
 import com.aizuda.snailjob.common.core.exception.SnailJobCommonException;
 import com.aizuda.snailjob.common.core.util.CronExpression;
+import com.aizuda.snailjob.common.core.util.JsonUtil;
 import com.aizuda.snailjob.server.common.WaitStrategy;
+import com.aizuda.snailjob.server.common.dto.PointInTimeDTO;
 import com.aizuda.snailjob.server.common.enums.DelayLevelEnum;
 import com.aizuda.snailjob.server.common.exception.SnailJobServerException;
 import com.aizuda.snailjob.server.common.util.DateUtils;
@@ -15,10 +17,9 @@ import lombok.Getter;
 import java.text.ParseException;
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.Date;
-import java.util.Objects;
-import java.util.Random;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 /**
  * 生成 {@link WaitStrategy} 实例.
@@ -65,9 +66,11 @@ public class WaitStrategies {
         DELAY_LEVEL(1, delayLevelWait()),
         FIXED(2, fixedWait()),
         CRON(3, cronWait()),
-        RANDOM(4, randomWait());
+        RANDOM(4, randomWait()),
+        POINT_IN_TIME(5, pointInTimeWait()),
+        ;
 
-        private final int type;
+        private final Integer type;
         private final WaitStrategy waitStrategy;
 
         /**
@@ -144,6 +147,15 @@ public class WaitStrategies {
      */
     public static WaitStrategy randomWait() {
         return new RandomWaitStrategy();
+    }
+
+    /**
+     * 指定时间等待
+     *
+     * @return {@link PointInTimeWaitStrategy} 指定时间等待
+     */
+    public static WaitStrategy pointInTimeWait() {
+        return new PointInTimeWaitStrategy();
     }
 
     /**
@@ -224,5 +236,32 @@ public class WaitStrategies {
             long t = Math.abs(RANDOM.nextLong()) % (maximum - minimum);
             return (TimeUnit.SECONDS.toMillis(t + minimum) + DateUtils.toNowMilli());
         }
+    }
+
+    /**
+     * 指定时间等待
+     */
+    private static final class PointInTimeWaitStrategy implements WaitStrategy {
+
+        private static final LocalDateTime MAX_DATE_TIME = LocalDateTime.of(2999, 12, 31, 23, 59, 59);
+        @Override
+        public Long computeTriggerTime(WaitStrategyContext context) {
+            String triggerInterval = context.getTriggerInterval();
+            List<PointInTimeDTO> pointInTimeList = JsonUtil.parseList(triggerInterval, PointInTimeDTO.class);
+            Optional<Long> nextTrigger = getNextTrigger(pointInTimeList, context.getNextTriggerAt());
+            return nextTrigger.orElseGet(() -> DateUtils.toEpochMilli(MAX_DATE_TIME));
+        }
+
+        public Optional<Long> getNextTrigger(List<PointInTimeDTO> pointInTimeList, Long nextTriggerAt) {
+            // 下次执行时间需要大于当前任务的执行时间
+            return pointInTimeList.stream()
+                    .filter(Objects::nonNull)
+                    .map(PointInTimeDTO::getTime)
+                    // 下次执行时间需要大于当前任务的执行时间
+                    .filter(t -> t > Optional.ofNullable(nextTriggerAt).orElse(DateUtils.toNowMilli()))
+                    .min(Comparator.naturalOrder());
+
+        }
+
     }
 }
